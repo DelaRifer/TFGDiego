@@ -1,0 +1,15 @@
+EXPLICACIÓN DE LOS CÓDIGOS:
+
+En esta carpeta aparecen los códigos previos al proceso de optimización, además del algoritmo de corte por capas y el algoritmo de obtención de la capa óptima para la división entre sectores lower y upper. Algunos de los algoritmos previos (como el ECOMMET AUTOMATIZADO CORTE POR CAPAS o el MALLADO MAS ADAPTACION), han sido modificados ligeramente con respecto a los originales. 
+
+CORTE POR CAPAS: Realiza la división del dataset de complejidad por capas. (separate_by_fls)
+
+CAPA ÓPTIMA: Calcula el nivel de vuelo óptimo para realizar la división del espacio aéreo. (optimal_layer_methods)
+
+MALLADO + ADAPTACIÓN: Se cambio con respecto al original para poder permitir disminuir el tamaño de celda (saltaban errores al modificar el mallado). (mesh)
+
+ECOMMET AUTOMATIZADO CORTE POR CAPAS: Realiza el cálculo de complejidad directamente de las subcarpetas de tráfico creadas con el corte por capas. 
+
+El codigo lo que hace es calcular para cada celda complejidad de diferentes parámetros.
+Esto lo hace teniendo en cuenta los aviones que hay en cada ventana de 5 minutos.
+Porque trata cada avión por separado. 

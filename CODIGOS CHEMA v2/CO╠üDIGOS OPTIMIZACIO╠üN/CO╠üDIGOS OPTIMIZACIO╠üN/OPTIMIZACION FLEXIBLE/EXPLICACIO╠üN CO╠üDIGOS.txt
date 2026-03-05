@@ -1,0 +1,3 @@
+EXPLICACIÓN DE LOS CÓDIGOS:
+
+Los dos códigos de esta carpeta realizan el proceso descrito en el capítulo de sectorización flexible. Realizan la creación de sectores a partir de configuraciones iniciales y posteriormente realizan una optimización por pares adyacentes. En uno de los códigos la optimización utilizada es con algoritmo iterativo y en el otro con algoritmo genético (se distinguen en el nombre claramente).

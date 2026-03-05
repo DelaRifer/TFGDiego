@@ -1,0 +1,6 @@
+EXPLICACIÓN DE LOS CÓDIGOS:
+
+GENÉTICO PARES ADYACENTES: Realiza una optimización sectorial por algoritmo genético con movimientos de celdas por pares adyacentes. El cambio máximo de celdas entre sectores se establece como el movimiento máximo de celdas que un sector puede realizar. 
+
+PARES ADYACENTES ITERATIVO: Realiza una optimización sectorial por algoritmo iterativo con movimientos de celdas por pares adyacentes. El cambio máximo de celdas entre sectores se establece como el movimiento máximo de celdas que un sector puede realizar. 
+

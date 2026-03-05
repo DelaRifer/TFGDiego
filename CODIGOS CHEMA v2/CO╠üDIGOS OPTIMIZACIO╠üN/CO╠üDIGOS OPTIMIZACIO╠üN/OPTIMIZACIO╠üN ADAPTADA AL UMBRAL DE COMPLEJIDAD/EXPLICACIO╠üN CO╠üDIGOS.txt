@@ -1,0 +1,3 @@
+EXPLICACIÓN DE LOS CÓDIGOS:
+
+Aparecen en esta carpeta los códigos pertenecientes al algoritmo de optimización por pares adyacentes tanto iterativo como por algoritmo genético, además de la creación de k sectores con post procesado iterativo por pares adyacentes. En estos códigos, en vez de escoger una configuración inicial de partida, el algoritmo determina el número mínimo de sectores y los optimiza, a partir de un valor de complejidad que el usuario debe insertar. En el caso de k sectores hay que elegir aparte la configuración inicial desde la que se quiere partir (n = 5 ya que si no se usarían los otros códigos). 
