@@ -1,0 +1,18 @@
+EXPLICACIÓN DE LOS CÓDIGOS:
+
+OPTIMIZACIÓN RECOCIDO 1 CELDA: Realiza una optimización sectorial por recocido simulado con movimientos de celdas individuales. El cambio máximo de celdas entre sectores se establece como la diferencia máxima final entre celdas iniciales y finales.
+
+OPTIMIZACIÓN RECOCIDO FINAL: Realiza una optimización sectorial por recocido simulado con movimientos de celdas individuales. El cambio máximo de celdas entre sectores se establece como el movimiento máximo de celdas que un sector puede realizar. 
+
+OPTIMIZACIÓN GENÉTICA 1 CELDA: Realiza una optimización sectorial por algoritmo genético con movimientos de celdas individuales. El cambio máximo de celdas entre sectores se establece como la diferencia máxima final entre celdas iniciales y finales.
+
+
+OPTIMIZACIÓN GENÉTICA FINAL: Realiza una optimización sectorial por algoritmo genético con movimientos de celdas individuales. El cambio máximo de celdas entre sectores se establece como el movimiento máximo de celdas que un sector puede realizar. 
+
+OPTIMIZACIÓN ITERATIVA 1 CELDA: Realiza una optimización sectorial por algoritmo iterativo con movimientos de celdas individuales. El cambio máximo de celdas entre sectores se establece como la diferencia máxima final entre celdas iniciales y finales.
+
+OPTIMIZACIÓN ITERATIVA FINAL: Realiza una optimización sectorial por algoritmo iterativo con movimientos de celdas individuales. El cambio máximo de celdas entre sectores se establece como el movimiento máximo de celdas que un sector puede realizar. 
+
+OPTIMIZACIÓN FLUJOS LATITUD LONGITUD :  Realiza una optimización sectorial por algoritmo iterativo con movimientos de celdas individuales y restricción en la direccionalidad de los flujos. El cambio máximo de celdas entre sectores se establece como la diferencia máxima final entre celdas iniciales y finales.
+
+OPTIMIZACIÓN FLUJOS LATITUD LONGITUD FINAL: Realiza una optimización sectorial por algoritmo iterativo con movimientos de celdas individuales y restricción en la direccionalidad de los flujos. El cambio máximo de celdas entre sectores se establece como el movimiento máximo de celdas que un sector puede realizar. 
