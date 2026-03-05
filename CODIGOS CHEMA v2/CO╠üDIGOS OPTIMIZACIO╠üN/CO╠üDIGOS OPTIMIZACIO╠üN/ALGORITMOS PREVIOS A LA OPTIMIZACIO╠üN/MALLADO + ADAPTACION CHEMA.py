@@ -1,3 +1,5 @@
+
+
 #%%
 # -------------------------------------------------------------------------------------------------------------------- #
 # ---------------------------------------- LIBRERIAS Y DIRECTORIOS NECESARIOS ---------------------------------------- #
@@ -509,7 +511,7 @@ plt.show()
 # MODO PRUEBAS (reversible)
 # ---------------------------
 FAST_MODE = True
-N_FLOWS_PRUEBA = 100          # procesa solo los primeros N flujos (debug)
+N_FLOWS_PRUEBA = 200          # procesa solo los primeros N flujos (debug)
 NUM_PUNTOS_FAST = 150         # en vez de 1000
 GUARDAR_EN_DISCO = False      # no guardes mientras iteras rápido
 
