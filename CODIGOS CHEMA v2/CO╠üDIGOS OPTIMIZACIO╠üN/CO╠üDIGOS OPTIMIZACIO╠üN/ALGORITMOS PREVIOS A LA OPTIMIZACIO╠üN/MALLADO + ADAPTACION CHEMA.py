@@ -35,6 +35,8 @@ import ast
 import math
 from shapely.prepared import prep
 from shapely.strtree import STRtree
+from shapely import wkt
+
 
 import time
 start_time = time.time()
@@ -856,62 +858,64 @@ DF_Flujos_completo['Trend_cell_salida'] = tendencias.apply(lambda x: x[1])
 #%%
 # -------------------------------------------------------------------------------------------------------------------- #
 # -------------------------------- COMPLETAR EL DATASET DEL ANÁLISIS CELDAS POR FLUJO -------------------------------- #
-# -------------------------------------------------------------------------------------------------------------------- #
+# ------------------------------------------------------------------------------------------------------------------- #
 
-# # CÁLCULO DE LA DISTANCIA RECORRIDA, EN MILLAS NÁUTICAS, ASOCIADA A CADA FLUJO CLUSTERIZADO. OBTENCIÓN DE LA DISTANCIA POR CELDA
+# CÁLCULO DE LA DISTANCIA RECORRIDA, EN MILLAS NÁUTICAS, ASOCIADA A CADA FLUJO CLUSTERIZADO. OBTENCIÓN DE LA DISTANCIA POR CELDA
 
-# # DISTANCIA TOTAL RECORRIDA EN EL FLUJO
-# # Función para calcular la distancia en NM entre dos puntos
-# def calcular_distancia_flujo_nm(row):
-#     punto_in = (row['lat_f_in'], row['lon_f_in'])
-#     punto_out = (row['lat_f_out'], row['lon_f_out'])
-#     # geopy.distance.geodesic devuelve la distancia en kilómetros
-#     distancia_km = geodesic(punto_in, punto_out).km
-#     # Convertir la distancia a millas náuticas (1 NM = 1.852 km) y se redondea a dos decimales
-#     distancia_NM = round(distancia_km / 1.852, 2)
-#     return distancia_NM
+# DISTANCIA TOTAL RECORRIDA EN EL FLUJO
+# Función para calcular la distancia en NM entre dos puntos
+def calcular_distancia_flujo_nm(row):
+    punto_in = (row['lat_f_in'], row['lon_f_in'])
+    punto_out = (row['lat_f_out'], row['lon_f_out'])
+    # geopy.distance.geodesic devuelve la distancia en kilómetros
+    distancia_km = geodesic(punto_in, punto_out).km
+    # Convertir la distancia a millas náuticas (1 NM = 1.852 km) y se redondea a dos decimales
+    distancia_NM = round(distancia_km / 1.852, 2)
+    return distancia_NM
 
-# # Crear la nueva columna 'Distancia_NM'
-# DF_Flujos_completo['Distancia_flujo_NM'] = DF_Flujos_completo.apply(calcular_distancia_flujo_nm, axis=1)
+# Crear la nueva columna 'Distancia_NM'
+DF_Flujos_completo['Distancia_flujo_NM'] = DF_Flujos_completo.apply(calcular_distancia_flujo_nm, axis=1)
 
 
-# # DISTANCIA PARCIAL RECORRIDA EN CADA CELDA
-# # Función para calcular distancias normalizadas por celda
-# def calcular_distancias_normalizadas_por_celda(row, df_cells):
-#     flujo_line = row['Line']  # LINESTRING del flujo
-#     total_distance = row['Distancia_flujo_NM']  # Distancia total del flujo
-#     distancias_normalizadas = []
+# DISTANCIA PARCIAL RECORRIDA EN CADA CELDA
+# Función para calcular distancias normalizadas por celda
+def calcular_distancias_normalizadas_por_celda(row, df_cells):
+    flujo_line = row['Line']  # LINESTRING del flujo
+    total_distance = row['Distancia_flujo_NM']  # Distancia total del flujo
+    distancias_normalizadas = []
 
-#     for cell_name in row['Cell_Names']:
-#         # Obtener el polígono de la celda
-#         polygon_data = df_cells[df_cells['Cell_Name'] == cell_name]
-#         if not polygon_data.empty:
-#             cell_polygon = Polygon(polygon_data.iloc[0]['Coordinates'])
+    for cell_name in row['Cell_Names']:
+        # Obtener el polígono de la celda
+        polygon_data = df_cells[df_cells['Cell_Name'] == cell_name]
+        if not polygon_data.empty:
+            cell_polygon = Polygon(polygon_data.iloc[0]['Coordinates'])
 
-#             # Intersección entre flujo y celda
-#             interseccion = flujo_line.intersection(cell_polygon)
+            # Intersección entre flujo y celda
+            interseccion = flujo_line.intersection(cell_polygon)
 
-#             # Calcular longitud de la intersección como proporción de la distancia total
-#             if not interseccion.is_empty:
-#                 interseccion_length = interseccion.length  # Longitud en coordenadas de mapa
-#                 proporcion = interseccion_length / flujo_line.length
-#                 distancia_celda = proporcion * total_distance
-#                 distancias_normalizadas.append(round(distancia_celda, 2))  # Redondear a 2 decimales
-#             else:
-#                 distancias_normalizadas.append(0.00)  # Caso de no intersección
-#         else:
-#             distancias_normalizadas.append(0.00)  # Celda no encontrada en DF_cells
+            # Calcular longitud de la intersección como proporción de la distancia total
+            if not interseccion.is_empty:
+                interseccion_length = interseccion.length  # Longitud en coordenadas de mapa
+                proporcion = interseccion_length / flujo_line.length
+                distancia_celda = proporcion * total_distance
+                distancias_normalizadas.append(round(distancia_celda, 2))  # Redondear a 2 decimales
+            else:
+                distancias_normalizadas.append(0.00)  # Caso de no intersección
+        else:
+            distancias_normalizadas.append(0.00)  # Celda no encontrada en DF_cells
 
-#     return distancias_normalizadas
+    return distancias_normalizadas
 
-# # Aplicar la función al dataframe
-# DF_Flujos_completo['Distancia_por_celda_NM'] = DF_Flujos_completo.apply(lambda row: calcular_distancias_normalizadas_por_celda(row, DF_cells), axis=1)
+# Aplicar la función al dataframe
+DF_Flujos_completo['Distancia_por_celda_NM'] = DF_Flujos_completo.apply(lambda row: calcular_distancias_normalizadas_por_celda(row, DF_cells), axis=1)
 
-# # # Expandir el anterior dataframe: para cada flujo habrá tantas entradas como celdas de paso lleve asociado el flujo.
-# # DF_Flujos_completo_exp = DF_Flujos_completo.apply(lambda x: x.explode() if x.name in ['Cell_Names', 'Trend_cell_entrada', 'Trend_cell_salida', 'Distancia_por_celda_NM'] else x, axis=0)
+# # Expandir el anterior dataframe: para cada flujo habrá tantas entradas como celdas de paso lleve asociado el flujo.
+# DF_Flujos_completo_exp = DF_Flujos_completo.apply(lambda x: x.explode() if x.name in ['Cell_Names', 'Trend_cell_entrada', 'Trend_cell_salida', 'Distancia_por_celda_NM'] else x, axis=0)
 
-# # # Resetear el índice para asegurar que cada fila tenga un índice único
-# # DF_Flujos_completo_exp = DF_Flujos_completo_exp.reset_index(drop=True)
+# # Resetear el índice para asegurar que cada fila tenga un índice único
+# DF_Flujos_completo_exp = DF_Flujos_completo_exp.reset_index(drop=True)
+cols = ['Cell_Names', 'Trend_cell_entrada', 'Trend_cell_salida', 'Distancia_por_celda_NM']
+
 
 # DF_Flujos_completo_exp = DF_Flujos_completo.copy()
 # for col in ['Cell_Names','Trend_cell_entrada','Trend_cell_salida','Distancia_por_celda_NM']:
@@ -919,119 +923,14 @@ DF_Flujos_completo['Trend_cell_salida'] = tendencias.apply(lambda x: x[1])
 # DF_Flujos_completo_exp = DF_Flujos_completo_exp.reset_index(drop=True)
 
 
-# # GUARDADO DE AMBOS DATAFRAMES
-# # Guardado en formato .csv para consulta
-# DF_Flujos_completo.to_csv(PATH_resultados + 'dataset_celdas_por_flujo_completo.csv', index=False, sep=';')
+# GUARDADO DE AMBOS DATAFRAMES
+# Guardado en formato .csv para consulta
+DF_Flujos_completo.to_csv(PATH_resultados + 'dataset_celdas_por_flujo_completo.csv', index=False, sep=';')
 # DF_Flujos_completo_exp.to_csv(PATH_resultados + 'dataset_celdas_por_flujo_completo_exp.csv', index=False, sep=';')
 
-# # Guardado en formato .pkl para su empleo en otros códigos
-# DF_Flujos_completo.to_pickle(PATH_resultados + 'dataset_celdas_por_flujo_completo.pkl')
-# DF_Flujos_completo_exp.to_pickle(PATH_resultados + 'dataset_celdas_por_flujo_completo_exp.pkl')
-
-# ------------------------------------------------------------
-# 1) DISTANCIA TOTAL RECORRIDA EN EL FLUJO (NM)
-# ------------------------------------------------------------
-def calcular_distancia_flujo_nm(row):
-    punto_in = (row['lat_f_in'], row['lon_f_in'])
-    punto_out = (row['lat_f_out'], row['lon_f_out'])
-    distancia_km = geodesic(punto_in, punto_out).km
-    return round(distancia_km / 1.852, 2)  # km -> NM
-
-DF_Flujos_completo['Distancia_flujo_NM'] = DF_Flujos_completo.apply(calcular_distancia_flujo_nm, axis=1)
-
-
-# ------------------------------------------------------------
-# 2) DISTANCIA PARCIAL POR CELDA (NM)
-#    (optimizado: precomputo polígonos para no filtrar DF_cells en cada iteración)
-# ------------------------------------------------------------
-cell_polygons = {
-    row.Cell_Name: Polygon(row.Coordinates)
-    for _, row in DF_cells.iterrows()
-}
-
-def calcular_distancias_normalizadas_por_celda(row):
-    flujo_line = row['Line']                  # LINESTRING del flujo
-    total_distance = row['Distancia_flujo_NM'] # distancia total del flujo (NM)
-
-    # Evitar divisiones raras si la línea tiene longitud 0
-    denom = flujo_line.length
-    if denom == 0 or total_distance is None:
-        # Devolver ceros del mismo tamaño que Cell_Names
-        cell_names = row['Cell_Names'] if isinstance(row['Cell_Names'], (list, tuple)) else [row['Cell_Names']]
-        return [0.00] * len(cell_names)
-
-    cell_names = row['Cell_Names'] if isinstance(row['Cell_Names'], (list, tuple)) else [row['Cell_Names']]
-    distancias = []
-
-    for cell_name in cell_names:
-        poly = cell_polygons.get(cell_name, None)
-        if poly is None:
-            distancias.append(0.00)
-            continue
-
-        inter = flujo_line.intersection(poly)
-        if inter.is_empty:
-            distancias.append(0.00)
-            continue
-
-        proporcion = inter.length / denom
-        distancias.append(round(proporcion * total_distance, 2))
-
-    return distancias
-
-DF_Flujos_completo['Distancia_por_celda_NM'] = DF_Flujos_completo.apply(calcular_distancias_normalizadas_por_celda, axis=1)
-
-
-# ------------------------------------------------------------
-# 3) EXPANDIR SIN "EXPLODE EN BUCLE" (EVITA CRECIMIENTO ENORME)
-#    -> explotar TODAS las columnas a la vez (alineado 1-a-1)
-# ------------------------------------------------------------
-cols_explode = ['Cell_Names', 'Trend_cell_entrada', 'Trend_cell_salida', 'Distancia_por_celda_NM']
-
-# Opción A (si te cabe en memoria): crea DF_Flujos_completo_exp en RAM
-# DF_Flujos_completo_exp = DF_Flujos_completo.explode(cols_explode, ignore_index=True)
-
-# Opción B (recomendada si te daba MemoryError): escribe el EXPANDIDO A CSV POR TROZOS (sin cargar 250M filas en RAM)
-out_csv_exp = PATH_resultados + 'dataset_celdas_por_flujo_completo_exp.csv'
-chunk_size = 50_000  # ajusta (10k–100k) según RAM
-first = True
-
-for i in range(0, len(DF_Flujos_completo), chunk_size):
-    part = DF_Flujos_completo.iloc[i:i + chunk_size].copy()
-
-    # Explode correcto (multi-col)
-    part_exp = part.explode(cols_explode, ignore_index=True)
-
-    part_exp.to_csv(
-        out_csv_exp,
-        index=False,
-        sep=';',
-        mode='w' if first else 'a',
-        header=first
-    )
-    first = False
-
-
-# ------------------------------------------------------------
-# 4) GUARDADO
-# ------------------------------------------------------------
-# Guardado del NO expandido
-DF_Flujos_completo.to_csv(PATH_resultados + 'dataset_celdas_por_flujo_completo.csv', index=False, sep=';')
+# Guardado en formato .pkl para su empleo en otros códigos
 DF_Flujos_completo.to_pickle(PATH_resultados + 'dataset_celdas_por_flujo_completo.pkl')
-
-# Si quieres PKL del expandido, NO lo hagas en un único objeto gigante si te dio MemoryError.
-# Alternativa: guardar PKL por trozos (recomendado):
-out_pkl_prefix = PATH_resultados + 'dataset_celdas_por_flujo_completo_exp_part_'
-part_id = 0
-first = True
-
-for i in range(0, len(DF_Flujos_completo), chunk_size):
-    part = DF_Flujos_completo.iloc[i:i + chunk_size].copy()
-    part_exp = part.explode(cols_explode, ignore_index=True)
-
-    part_exp.to_pickle(f"{out_pkl_prefix}{part_id:04d}.pkl")
-    part_id += 1
-
+# DF_Flujos_completo_exp.to_pickle(PATH_resultados + 'dataset_celdas_por_flujo_completo_exp.pkl')
 
 
 #%%
@@ -1185,6 +1084,21 @@ def calcular_altitud(x, coef, trayectoria):
 
     return round(modoC,-1) # Redondear a las decenas
 
+#Función para que las celdas no tengan texto al pasar de pickle a csv
+def asegurar_lista(x):
+    if isinstance(x, list):
+        return x
+    if pd.isna(x):
+        return []
+    if isinstance(x, str):
+        x = x.strip()
+        if x.startswith('[') and x.endswith(']'):
+            try:
+                return ast.literal_eval(x)
+            except:
+                return []
+        return [x]
+    return []
 
 # Función principal de cálculo de altitud en celda
 def calcular_altitudes_en_celdas(df_predicciones, df_flujos, df_cells):
@@ -1257,14 +1171,31 @@ def calcular_altitudes_en_celdas(df_predicciones, df_flujos, df_cells):
             coef = calcular_parabola(punto_in, punto_out, vertice, concava_hacia_arriba)
 
         # Obtener celdas atravesadas
+        # celdas = df_flujos.loc[df_flujos['Flujo_Clusterizado'] == flujo, 'Cell_Names']
+        # if not celdas.empty:
+        #     celdas = celdas.iloc[0]  # Extraer el valor como lista (si es una lista en 'Cell_Names')
+        # else:
+        #     celdas = []
+
+        # for celda in celdas:
+        #     polygon = df_cells.loc[df_cells['Cell_Name'] == celda, 'Polygon'].values[0]
+        
+        # Obtener celdas atravesadas
         celdas = df_flujos.loc[df_flujos['Flujo_Clusterizado'] == flujo, 'Cell_Names']
         if not celdas.empty:
-            celdas = celdas.iloc[0]  # Extraer el valor como lista (si es una lista en 'Cell_Names')
+            celdas = asegurar_lista(celdas.iloc[0])   # <-- aquí está la clave
         else:
             celdas = []
 
         for celda in celdas:
-            polygon = df_cells.loc[df_cells['Cell_Name'] == celda, 'Polygon'].values[0]
+            celda = str(celda).strip()
+
+            polygon_row = df_cells.loc[df_cells['Cell_Name'] == celda, 'Polygon']
+            if polygon_row.empty:
+                print(f"Celda no encontrada en df_cells: {celda} | flujo={flujo} | flightKey={flightkey}")
+                continue
+
+            polygon = polygon_row.iloc[0]
             line = LineString([(fila['lon_f_in'], fila['lat_f_in']), (fila['lon_f_out'], fila['lat_f_out'])])
             interseccion = line.intersection(polygon)
 
