@@ -20,6 +20,7 @@ from itertools import product
 from matplotlib.lines import Line2D
 import geopy.distance
 from geopy.distance import geodesic
+from shapely import wkt
 from shapely.wkt import loads
 import pickle
 from shapely.geometry import Polygon, Point, LineString, box
@@ -35,7 +36,7 @@ import ast
 import math
 from shapely.prepared import prep
 from shapely.strtree import STRtree
-from shapely import wkt
+
 
 
 import time
@@ -992,9 +993,31 @@ DF_TRAFICO[['lista_fecha-entrada_celda', 'lista_fecha-salida_celda']] = DF_TRAFI
 # -------------------------------------------------------------------------------------------------------------------- #
 
 # CÁLCULO APROXIMADO DE LOS NIVELES DE VUELO DE ENTRADA Y DE SALIDA A CADA CELDA
+
 # Dataframe de trafico auxiliar para el cálculo de los niveles de vuelo
 DF_TRAFICO_ = DF_TRAFICO.copy()
-DF_TRAFICO_ = pd.merge(DF_TRAFICO_, DF_Flujos[['Flujo_Clusterizado', 'lon_f_in', 'lat_f_in', 'lon_f_out', 'lat_f_out']], how='left', on='Flujo_Clusterizado')
+DF_TRAFICO_ = pd.merge(
+    DF_TRAFICO_,
+    DF_Flujos[['Flujo_Clusterizado', 'lon_f_in', 'lat_f_in', 'lon_f_out', 'lat_f_out']],
+    how='left',
+    on='Flujo_Clusterizado'
+)
+
+# Adaptación de los datos cargados desde csv
+DF_cells = DF_cells.copy()
+DF_Flujos = DF_Flujos.copy()
+
+DF_cells['Cell_Name'] = DF_cells['Cell_Name'].astype(str).str.strip()
+
+def convertir_polygon(x):
+    if isinstance(x, str):
+        x = x.strip()
+        if x == "":
+            return None
+        return wkt.loads(x)
+    return x
+
+DF_cells['Polygon'] = DF_cells['Polygon'].apply(convertir_polygon)
 
 # Funciones para la definición del tipo de trayectoria
 def calcular_parabola(punto_in, punto_out, vertice="desconocido", concava_hacia_arriba=True):
@@ -1006,7 +1029,7 @@ def calcular_parabola(punto_in, punto_out, vertice="desconocido", concava_hacia_
         punto_in (tuple): Coordenadas (x, y, z) del punto de entrada.
         punto_out (tuple): Coordenadas (x, y, z) del punto de salida.
         vertice (str): Indica si el vértice está en "IN", "OUT", o es "desconocido".
-        cóncava_hacia_arriba (bool): Indica si la parábola es cóncava hacia arriba.
+        concava_hacia_arriba (bool): Indica si la parábola es cóncava hacia arriba.
 
     Returns:
         tuple: Coeficientes de la parábola [a, b, c].
@@ -1040,6 +1063,7 @@ def calcular_parabola(punto_in, punto_out, vertice="desconocido", concava_hacia_
         [x_out ** 2, x_out, 1]
     ])
     B = np.array([z_in, z_vertice, z_out])
+
     coef = np.linalg.solve(A, B)
     return coef  # [a, b, c]
 
@@ -1059,6 +1083,10 @@ def calcular_recta(punto_in, punto_out):
 
     x_in, y_in, z_in = punto_in
     x_out, y_out, z_out = punto_out
+
+    # Evitar división entre cero
+    if x_out == x_in:
+        return None
 
     # Calcular la pendiente m
     m = (z_out - z_in) / (x_out - x_in)
@@ -1082,9 +1110,10 @@ def calcular_altitud(x, coef, trayectoria):
         a, b, c = coef
         modoC = a * x**2 + b * x + c
 
-    return round(modoC,-1) # Redondear a las decenas
+    return round(modoC, -1)  # Redondear a las decenas
 
-#Función para que las celdas no tengan texto al pasar de pickle a csv
+
+# Función para que las celdas no tengan texto al pasar de pickle a csv
 def asegurar_lista(x):
     if isinstance(x, list):
         return x
@@ -1100,12 +1129,15 @@ def asegurar_lista(x):
         return [x]
     return []
 
+
 # Función principal de cálculo de altitud en celda
 def calcular_altitudes_en_celdas(df_predicciones, df_flujos, df_cells):
     DF_modoC_cells = pd.DataFrame()
 
     for _, fila in df_predicciones.iterrows():
         resultados = []
+        trayectoria = None
+
         flujo = fila['Flujo_Clusterizado']
         sector = fila['Sector']
         flightkey = fila['flightKey']
@@ -1118,12 +1150,6 @@ def calcular_altitudes_en_celdas(df_predicciones, df_flujos, df_cells):
         # CASOS A CONSIDERAR SEGÚN LAS COMBINACIONES DE TREND ENTRADA Y SALIDA EN FUNCIÓN DE LA FLOW TREND: TRAYECTORIA RECTILÍNEA O PARABÓLICA
         # FLOW TREND: CRUISE
         if trend_flow == 'CRUISE' and trend_entrada == 'CRUISE' and trend_salida == 'CRUISE':
-            trayectoria = 'rectilinea'
-
-        elif trend_flow == 'CRUISE' and trend_entrada == 'CLIMB' and trend_salida == 'CRUISE':
-            trayectoria = 'rectilinea'
-
-        elif trend_flow == 'CRUISE' and trend_entrada == 'DESCEND' and trend_salida == 'CRUISE':
             trayectoria = 'rectilinea'
 
         elif trend_flow == 'CRUISE' and trend_entrada == 'CLIMB' and trend_salida == 'CRUISE':
@@ -1164,26 +1190,26 @@ def calcular_altitudes_en_celdas(df_predicciones, df_flujos, df_cells):
             concava_hacia_arriba = False
             vertice = 'desconocido'
 
+        # Si no entra en ningún caso, saltar esa fila
+        if trayectoria is None:
+            continue
+
         # Calcular coeficientes según la trayectoria (rectilínea o parabólica)
         if trayectoria == 'rectilinea':
             coef = calcular_recta(punto_in, punto_out)
+            if coef is None:
+                continue
+
         elif trayectoria == 'parabolica':
-            coef = calcular_parabola(punto_in, punto_out, vertice, concava_hacia_arriba)
+            try:
+                coef = calcular_parabola(punto_in, punto_out, vertice, concava_hacia_arriba)
+            except np.linalg.LinAlgError:
+                continue
 
-        # Obtener celdas atravesadas
-        # celdas = df_flujos.loc[df_flujos['Flujo_Clusterizado'] == flujo, 'Cell_Names']
-        # if not celdas.empty:
-        #     celdas = celdas.iloc[0]  # Extraer el valor como lista (si es una lista en 'Cell_Names')
-        # else:
-        #     celdas = []
-
-        # for celda in celdas:
-        #     polygon = df_cells.loc[df_cells['Cell_Name'] == celda, 'Polygon'].values[0]
-        
         # Obtener celdas atravesadas
         celdas = df_flujos.loc[df_flujos['Flujo_Clusterizado'] == flujo, 'Cell_Names']
         if not celdas.empty:
-            celdas = asegurar_lista(celdas.iloc[0])   # <-- aquí está la clave
+            celdas = asegurar_lista(celdas.iloc[0])
         else:
             celdas = []
 
@@ -1196,7 +1222,15 @@ def calcular_altitudes_en_celdas(df_predicciones, df_flujos, df_cells):
                 continue
 
             polygon = polygon_row.iloc[0]
-            line = LineString([(fila['lon_f_in'], fila['lat_f_in']), (fila['lon_f_out'], fila['lat_f_out'])])
+
+            if polygon is None:
+                continue
+
+            line = LineString([
+                (fila['lon_f_in'], fila['lat_f_in']),
+                (fila['lon_f_out'], fila['lat_f_out'])
+            ])
+
             interseccion = line.intersection(polygon)
 
             if interseccion.is_empty:
@@ -1204,32 +1238,70 @@ def calcular_altitudes_en_celdas(df_predicciones, df_flujos, df_cells):
 
             if interseccion.geom_type == 'LineString':
                 puntos = [interseccion.coords[0], interseccion.coords[-1]]
-            else:  # Caso de múltiples puntos
-                puntos = interseccion.coords
+
+            elif interseccion.geom_type == 'MultiLineString':
+                puntos = []
+                for tramo in interseccion.geoms:
+                    puntos.extend([tramo.coords[0], tramo.coords[-1]])
+
+            elif interseccion.geom_type == 'Point':
+                puntos = [interseccion.coords[0]]
+
+            elif interseccion.geom_type == 'MultiPoint':
+                puntos = [pt.coords[0] for pt in interseccion.geoms]
+
+            else:
+                continue
 
             for x, y in puntos:
                 altitud = calcular_altitud(x, coef, trayectoria)
-                resultados.append({'flightKey': flightkey,'Sector': sector,'Flujo_Clusterizado': flujo,'Cell_Name': celda,'lon': x,'lat': y,'Altitud': altitud})
+                resultados.append({
+                    'flightKey': flightkey,
+                    'Sector': sector,
+                    'Flujo_Clusterizado': flujo,
+                    'Cell_Name': celda,
+                    'lon': x,
+                    'lat': y,
+                    'Altitud': altitud
+                })
 
-            resultados_DF = pd.DataFrame(resultados)
+        if len(resultados) == 0:
+            continue
 
-            # Reorganizar los datos del DF. Crear columnas separadas para coordenadas "in" y "out" de los puntos que definen el flujo clusterizado en cada celda
-            resultados_in = resultados_DF.groupby('Cell_Name').nth(0).reset_index(drop=True)  # Filtrar los resultados "in" (primera fila de cada celda)
-            resultados_out = resultados_DF.groupby('Cell_Name').nth(1).reset_index(drop=True)  # Filtrar los resultados "out" (segunda fila de cada celda)
-            # Reordenar las columnas para las coordenadas y el FL "in" y "out" para cada celda
-            resultados_in.columns = ['flightKey', 'Sector', 'Flujo_Clusterizado', 'Cell_Name', 'lon_cell_in', 'lat_cell_in', 'modoCIN_cell']
-            resultados_out.columns = ['flightKey', 'Sector', 'Flujo_Clusterizado', 'Cell_Name', 'lon_cell_out', 'lat_cell_out', 'modoCOUT_cell']
-            # Elimino columna 'flujo' repetida en ambos dataframes
-            resultados_out = resultados_out.drop(columns=['flightKey', 'Sector', 'Flujo_Clusterizado',])
-            # Unir ambos dataFrames por la columna 'celda'
-            resultados_modoC = pd.merge(resultados_in, resultados_out, on='Cell_Name', how='left')
-            # Reorganizar columnas
-            resultados_modoC = resultados_modoC[['flightKey','Sector','Flujo_Clusterizado','Cell_Name','lon_cell_in','lat_cell_in','lon_cell_out','lat_cell_out','modoCIN_cell','modoCOUT_cell']]
+        resultados_DF = pd.DataFrame(resultados)
 
-        #Concatenar los dataframes generados para cada fila
-        DF_modoC_cells = pd.concat([DF_modoC_cells,resultados_modoC], ignore_index=True)
+        # Reorganizar los datos del DF. Crear columnas separadas para coordenadas "in" y "out" de los puntos que definen el flujo clusterizado en cada celda
+        resultados_in = resultados_DF.groupby('Cell_Name').nth(0).reset_index(drop=True)
+        resultados_out = resultados_DF.groupby('Cell_Name').nth(1).reset_index(drop=True)
+
+        resultados_in.columns = [
+            'flightKey', 'Sector', 'Flujo_Clusterizado', 'Cell_Name',
+            'lon_cell_in', 'lat_cell_in', 'modoCIN_cell'
+        ]
+
+        resultados_out.columns = [
+            'flightKey', 'Sector', 'Flujo_Clusterizado', 'Cell_Name',
+            'lon_cell_out', 'lat_cell_out', 'modoCOUT_cell'
+        ]
+
+        # Elimino columna 'flujo' repetida en ambos dataframes
+        resultados_out = resultados_out.drop(columns=['flightKey', 'Sector', 'Flujo_Clusterizado'])
+
+        # Unir ambos dataFrames por la columna 'celda'
+        resultados_modoC = pd.merge(resultados_in, resultados_out, on='Cell_Name', how='left')
+
+        # Reorganizar columnas
+        resultados_modoC = resultados_modoC[
+            ['flightKey', 'Sector', 'Flujo_Clusterizado', 'Cell_Name',
+             'lon_cell_in', 'lat_cell_in', 'lon_cell_out', 'lat_cell_out',
+             'modoCIN_cell', 'modoCOUT_cell']
+        ]
+
+        # Concatenar los dataframes generados para cada fila
+        DF_modoC_cells = pd.concat([DF_modoC_cells, resultados_modoC], ignore_index=True)
 
     return DF_modoC_cells
+
 
 # Aplicar la función principal al dataframe de predicciones
 DF_resultados_modoC = calcular_altitudes_en_celdas(DF_TRAFICO_, DF_Flujos, DF_cells)
