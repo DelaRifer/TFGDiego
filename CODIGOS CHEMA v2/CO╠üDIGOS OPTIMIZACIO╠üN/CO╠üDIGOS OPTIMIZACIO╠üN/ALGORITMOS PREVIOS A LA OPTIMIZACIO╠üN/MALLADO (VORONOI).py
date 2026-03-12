@@ -1,5 +1,3 @@
-
-
 #%%
 # -------------------------------------------------------------------------------------------------------------------- #
 # ---------------------------------------- LIBRERIAS Y DIRECTORIOS NECESARIOS ---------------------------------------- #
@@ -12,10 +10,8 @@ import os
 import pandas as pd
 import numpy as np
 import shapely
-from shapely.geometry import box
 import geopandas as gpd
 import matplotlib.pyplot as plt
-import itertools
 from itertools import product
 from matplotlib.lines import Line2D
 import geopy.distance
@@ -23,10 +19,8 @@ from geopy.distance import geodesic
 from shapely import wkt
 from shapely.wkt import loads
 import pickle
-from shapely.geometry import Point, LineString
-from shapely.ops import nearest_points
-from shapely.geometry import Polygon, MultiPolygon
-from shapely.ops import unary_union
+from shapely.geometry import Polygon, MultiPolygon, Point, LineString, box
+from shapely.ops import unary_union, nearest_points
 from datetime import datetime
 import shap
 import time
@@ -48,7 +42,7 @@ PATH_SECTOR_DATA = "C:\\TFG\\Codigos Chema\\Datos\\1. bloque prediccion\\1. bloq
 PATH_flujos = "C:\\TFG\\Codigos Chema\\Datos\\2. bloque complejidad\\2. bloque complejidad\\Datos\\MATRIZ DE INTERACCION DE FLUJOS\\"
 PATH_resultados = "C:\\TFG\\Codigos Chema\\Datos\\3. bloque optimizacion\\3. bloque optimizacion\\Resultados analisis flujo celda\\"
 PATH_TRAFICO_CELDA = "C:\\TFG\\Codigos Chema\\Datos\\3. bloque optimizacion\\3. bloque optimizacion\\Datos de entrada eCOMMET\\"
-PATH_SEMILLA = "C:\\TFG\\Codigos DIEGO\\datos\\"
+# PATH_SEMILLA = "C:\\TFG\\Codigos DIEGO\\datos\\" #Puntos que semilla Voronoi
 configuracion_estudio = 'CNF9A2'
 
 
@@ -257,87 +251,87 @@ AIRSPACES2 = AIRSPACES2.rename(columns={'AIRSPACE_ID': 'SECTOR_ID', 'Contorno Se
 
 
 
-# IMPORTACION DE LA BASE DE DATOS DE PUNTOS SEMILLA
-DF_Puntos_ = pd.read_csv(
-    PATH_SEMILLA + "Puntos_Enruta.csv",
-    sep=",",
-    encoding="latin1",
-    dtype=None,        # intenta inferir tipos
-    parse_dates=True,  # intenta convertir fechas
-    low_memory=False
-)
+# # IMPORTACION DE LA BASE DE DATOS DE PUNTOS DE ENRUTA
+# DF_Puntos_ = pd.read_csv(
+#     PATH_SEMILLA + "Puntos_Enruta.csv",
+#     sep=",",
+#     encoding="latin1",
+#     dtype=None,        # intenta inferir tipos
+#     parse_dates=True,  # intenta convertir fechas
+#     low_memory=False
+# )
 
-DF_Puntos = DF_Puntos_.copy()
-
-
-#  CONVERSION DE COORDENADAS A GRADOS DECIMALES 
-# FUNCION PARA CONVERTIR COORDENADAS TIPO ICAO A GRADOS DECIMALES
-# LAT -> DDMMSS,ssssN/S
-# LON -> DDDMMSS,ssssE/W
-
-def convertir_coord_icao_a_decimal(coord_txt, tipo='lat'):
-
-    if pd.isna(coord_txt):
-        return None
-
-    coord_txt = str(coord_txt).strip().replace(' ', '').replace(',', '.')
-    hemisferio = coord_txt[-1].upper()
-    valor = coord_txt[:-1]
-
-    if '.' in valor:
-        parte_entera, parte_decimal = valor.split('.', 1)
-    else:
-        parte_entera = valor
-        parte_decimal = ''
-
-    if tipo == 'lat':
-        grados = int(parte_entera[0:2])
-        minutos = int(parte_entera[2:4])
-        segundos_txt = parte_entera[4:]
-    else:
-        grados = int(parte_entera[0:3])
-        minutos = int(parte_entera[3:5])
-        segundos_txt = parte_entera[5:]
-
-    if parte_decimal != '':
-        segundos = float(segundos_txt + '.' + parte_decimal)
-    else:
-        segundos = float(segundos_txt)
-
-    coord_decimal = grados + minutos / 60 + segundos / 3600
-
-    if hemisferio in ['S', 'W']:
-        coord_decimal = -coord_decimal
-
-    return coord_decimal
+# DF_Puntos = DF_Puntos_.copy()
 
 
-# PREPARACION DE LOS PUNTOS EN RUTA
-# SELECCION DE LAS COLUMNAS DE INTERES
+# #  CONVERSION DE COORDENADAS A GRADOS DECIMALES 
+# # FUNCION PARA CONVERTIR COORDENADAS TIPO ICAO A GRADOS DECIMALES
+# # LAT -> DDMMSS,ssssN/S
+# # LON -> DDDMMSS,ssssE/W
 
-DF_Puntos = DF_Puntos[['IDENT_TXT', 'NAME_TXT', 'LAT_TXT', 'LONG_TXT']].copy()
-DF_Puntos = DF_Puntos.rename(columns={
-    'IDENT_TXT': 'PUNTO_ID',
-    'NAME_TXT': 'NOMBRE',
-    'LAT_TXT': 'LAT_TXT',
-    'LONG_TXT': 'LON_TXT'
-})
+# def convertir_coord_icao_a_decimal(coord_txt, tipo='lat'):
 
-# ELIMINAR FILAS SIN COORDENADAS
-DF_Puntos = DF_Puntos.dropna(subset=['LAT_TXT', 'LON_TXT']).reset_index(drop=True)
+#     if pd.isna(coord_txt):
+#         return None
 
-# CONVERSION DE COORDENADAS A GRADOS DECIMALES
-DF_Puntos['LAT'] = DF_Puntos['LAT_TXT'].apply(lambda x: convertir_coord_icao_a_decimal(x, tipo='lat'))
-DF_Puntos['LON'] = DF_Puntos['LON_TXT'].apply(lambda x: convertir_coord_icao_a_decimal(x, tipo='lon'))
+#     coord_txt = str(coord_txt).strip().replace(' ', '').replace(',', '.')
+#     hemisferio = coord_txt[-1].upper()
+#     valor = coord_txt[:-1]
 
-# CREACION DE UNA COLUMNA DE COORDENADAS EN EL MISMO FORMATO QUE BLOQUES.TXT
-# FORMATO: (LAT, LON)
-DF_Puntos['Coordenadas'] = list(zip(DF_Puntos['LAT'], DF_Puntos['LON']))
+#     if '.' in valor:
+#         parte_entera, parte_decimal = valor.split('.', 1)
+#     else:
+#         parte_entera = valor
+#         parte_decimal = ''
 
-# DATAFRAME FINAL DE PUNTOS
-DF_Puntos_Enruta = DF_Puntos[['PUNTO_ID', 'NOMBRE', 'LAT', 'LON', 'Coordenadas']].copy()
+#     if tipo == 'lat':
+#         grados = int(parte_entera[0:2])
+#         minutos = int(parte_entera[2:4])
+#         segundos_txt = parte_entera[4:]
+#     else:
+#         grados = int(parte_entera[0:3])
+#         minutos = int(parte_entera[3:5])
+#         segundos_txt = parte_entera[5:]
 
-print(DF_Puntos_Enruta.head())
+#     if parte_decimal != '':
+#         segundos = float(segundos_txt + '.' + parte_decimal)
+#     else:
+#         segundos = float(segundos_txt)
+
+#     coord_decimal = grados + minutos / 60 + segundos / 3600
+
+#     if hemisferio in ['S', 'W']:
+#         coord_decimal = -coord_decimal
+
+#     return coord_decimal
+
+
+# # PREPARACION DE LOS PUNTOS EN RUTA
+# # SELECCION DE LAS COLUMNAS DE INTERES
+
+# DF_Puntos = DF_Puntos[['IDENT_TXT', 'NAME_TXT', 'LAT_TXT', 'LONG_TXT']].copy()
+# DF_Puntos = DF_Puntos.rename(columns={
+#     'IDENT_TXT': 'PUNTO_ID',
+#     'NAME_TXT': 'NOMBRE',
+#     'LAT_TXT': 'LAT_TXT',
+#     'LONG_TXT': 'LON_TXT'
+# })
+
+# # ELIMINAR FILAS SIN COORDENADAS
+# DF_Puntos = DF_Puntos.dropna(subset=['LAT_TXT', 'LON_TXT']).reset_index(drop=True)
+
+# # CONVERSION DE COORDENADAS A GRADOS DECIMALES
+# DF_Puntos['LAT'] = DF_Puntos['LAT_TXT'].apply(lambda x: convertir_coord_icao_a_decimal(x, tipo='lat'))
+# DF_Puntos['LON'] = DF_Puntos['LON_TXT'].apply(lambda x: convertir_coord_icao_a_decimal(x, tipo='lon'))
+
+# # CREACION DE UNA COLUMNA DE COORDENADAS EN EL MISMO FORMATO QUE BLOQUES.TXT
+# # FORMATO: (LAT, LON)
+# DF_Puntos['Coordenadas'] = list(zip(DF_Puntos['LAT'], DF_Puntos['LON']))
+
+# # DATAFRAME FINAL DE PUNTOS
+# DF_Puntos_Enruta = DF_Puntos[['PUNTO_ID', 'NOMBRE', 'LAT', 'LON', 'Coordenadas']].copy()
+
+# print(DF_Puntos_Enruta.head())
 
 
 
@@ -415,24 +409,6 @@ else:
 poligono_ACC = Polygon(poligono_ACC)
 
 
-#  FILTRADO DE PUNTOS SEMILLA DENTRO DEL ACC 
-
-ACC_preparado = prep(poligono_ACC)
-
-DF_Puntos_Enruta['Dentro_ACC'] = DF_Puntos_Enruta.apply(
-    lambda row: ACC_preparado.covers(Point(row['LON'], row['LAT'])),
-    axis=1
-)
-
-DF_Puntos_Enruta_ACC = DF_Puntos_Enruta[DF_Puntos_Enruta['Dentro_ACC']].copy()
-DF_Puntos_Enruta_ACC = DF_Puntos_Enruta_ACC.reset_index(drop=True)
-
-print('Numero total de puntos:', len(DF_Puntos_Enruta))
-print('Numero de puntos dentro del ACC:', len(DF_Puntos_Enruta_ACC))
-print('Numero de puntos fuera del ACC:', len(DF_Puntos_Enruta) - len(DF_Puntos_Enruta_ACC))
-
-
-
 # REPRESENTACIÓN DEL ESPACIO AÉREO ASOCIADO AL ACC
 min_lat = []
 max_lat = []
@@ -467,12 +443,98 @@ plt.show()
 # ------------------------------------------- OBTENCIÓN DEL MALLADO DEL ACC ------------------------------------------ #
 # -------------------------------------------------------------------------------------------------------------------- #
 
+# MALLADO DEL ACC
+# Tamaño de celda en millas náuticas
+cell_size_nm = 25
+
+# Convertir tamaño de celdas de NM a grados de latitud (constante)
+cell_size_lat_deg = cell_size_nm / 60.0
+
+# Obtener los límites del sector
+minx, miny, maxx, maxy = poligono_ACC.bounds
+
+# Crear celdas ajustando longitud a partir de latitud promedio del sector
+lat_center = (miny + maxy) / 2
+cell_size_lon_deg = cell_size_nm / (math.cos(math.radians(lat_center)) * 60)
+
+# Lista para almacenar los datos de las celdas
+cell_data = []
+
+# Crear la malla desde la esquina superior izquierda (con soporte para MultiPolygon)
+cells = []
+cell_id = 1  # Iniciar el contador para las celdas
+current_lat = maxy  # Iniciar desde la latitud máxima (norte)
+
+while current_lat > miny:  # Decrecer latitud hacia el sur
+    current_lon = minx  # Iniciar desde la longitud mínima (oeste)
+    while current_lon < maxx:  # Aumentar longitud hacia el este
+        # Crear la celda
+        cell = box(current_lon, current_lat - cell_size_lat_deg, current_lon + cell_size_lon_deg, current_lat)
+        # Recortar la celda con el espacio aéreo
+        intersected_cell = cell.intersection(poligono_ACC)
+
+        if not intersected_cell.is_empty:
+            if isinstance(intersected_cell, Polygon):
+                coords = list(intersected_cell.exterior.coords)
+                cells.append(intersected_cell)
+                cell_data.append({
+                    'Cell_Name': f'Cell_{cell_id}',
+                    'Polygon': intersected_cell,
+                    'Coordinates': coords
+                })
+                cell_id += 1
+
+            elif isinstance(intersected_cell, MultiPolygon):
+                for poly in intersected_cell.geoms:
+                    coords = list(poly.exterior.coords)
+                    cells.append(poly)
+                    cell_data.append({
+                        'Cell_Name': f'Cell_{cell_id}',
+                        'Polygon': poly,
+                        'Coordinates': coords
+                    })
+                    cell_id += 1
+
+        current_lon += cell_size_lon_deg  # Moverse hacia el este
+    current_lat -= cell_size_lat_deg  # Moverse hacia el sur
+
+
+# Crear un DataFrame con los datos
+DF_cells = pd.DataFrame(cell_data)
+
+def calcular_centros_celdas(DF_cells):
+    """
+    Añade al DataFrame de celdas las coordenadas del centro de cada polígono.
+
+    Parámetros
+    ----------
+    DF_cells : pandas.DataFrame
+        DataFrame que debe contener al menos la columna 'Polygon'
+        con geometrías shapely.
+
+    Devuelve
+    --------
+    pandas.DataFrame
+        Copia de DF_cells con dos columnas nuevas:
+        - 'Lon_Centro'
+        - 'Lat_Centro'
+    """
+
+    DF_cells_centros = DF_cells.copy()
+
+    DF_cells_centros['Centroide'] = DF_cells_centros['Polygon'].apply(lambda poly: poly.centroid)
+    DF_cells_centros['Lon_Centro'] = DF_cells_centros['Centroide'].apply(lambda p: p.x)
+    DF_cells_centros['Lat_Centro'] = DF_cells_centros['Centroide'].apply(lambda p: p.y)
+
+    return DF_cells_centros
+
+DF_cells_centros = calcular_centros_celdas(DF_cells)
+
+Puntos_Centro_Celdas = DF_cells_centros[['Lon_Centro', 'Lat_Centro']].copy()
+Puntos_Centro_Celdas = Puntos_Centro_Celdas.rename(columns={'Lon_Centro': 'LON', 'Lat_Centro': 'LAT'})
+
 # DEFINICION DE LOS PUNTOS SEMILLA
-Puntos_Semilla = DF_Puntos_Enruta_ACC.copy()
-
-print('Numero de puntos semilla:', len(Puntos_Semilla))
-print(Puntos_Semilla.head())
-
+Puntos_Semilla = Puntos_Centro_Celdas.copy()
 
 # REPRESENTACION DEL ACC JUNTO CON LOS PUNTOS SEMILLA
 min_lat = []
@@ -580,6 +642,7 @@ plt.show()
 # VERTICES FINITOS OBTENIDOS DEL DIAGRAMA DE VORONOI
 
 #Vertices_Voronoi = vor.vertices.copy() #Todos los vértices, incluidos los infinitos
+ACC_preparado = prep(poligono_ACC)
 
 Vertices_Voronoi = np.array([
     v for v in vor.vertices
