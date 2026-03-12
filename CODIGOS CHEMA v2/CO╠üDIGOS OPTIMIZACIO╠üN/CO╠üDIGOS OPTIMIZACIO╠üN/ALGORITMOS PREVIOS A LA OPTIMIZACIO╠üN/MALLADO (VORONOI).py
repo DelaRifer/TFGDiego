@@ -42,7 +42,6 @@ PATH_SECTOR_DATA = "C:\\TFG\\Codigos Chema\\Datos\\1. bloque prediccion\\1. bloq
 PATH_flujos = "C:\\TFG\\Codigos Chema\\Datos\\2. bloque complejidad\\2. bloque complejidad\\Datos\\MATRIZ DE INTERACCION DE FLUJOS\\"
 PATH_resultados = "C:\\TFG\\Codigos Chema\\Datos\\3. bloque optimizacion\\3. bloque optimizacion\\Resultados analisis flujo celda\\"
 PATH_TRAFICO_CELDA = "C:\\TFG\\Codigos Chema\\Datos\\3. bloque optimizacion\\3. bloque optimizacion\\Datos de entrada eCOMMET\\"
-# PATH_SEMILLA = "C:\\TFG\\Codigos DIEGO\\datos\\" #Puntos que semilla Voronoi
 configuracion_estudio = 'CNF9A2'
 
 
@@ -248,92 +247,6 @@ AIRSPACES2 = pd.concat([AIRSPACES['AIRSPACE_ID'], AIRSPACES['Contorno Sector Col
                         AIRSPACES['ACC']], axis=1)
 # RENOMBRA COLUMNAS
 AIRSPACES2 = AIRSPACES2.rename(columns={'AIRSPACE_ID': 'SECTOR_ID', 'Contorno Sector Colapsado': 'Contorno Sector'})
-
-
-
-# # IMPORTACION DE LA BASE DE DATOS DE PUNTOS DE ENRUTA
-# DF_Puntos_ = pd.read_csv(
-#     PATH_SEMILLA + "Puntos_Enruta.csv",
-#     sep=",",
-#     encoding="latin1",
-#     dtype=None,        # intenta inferir tipos
-#     parse_dates=True,  # intenta convertir fechas
-#     low_memory=False
-# )
-
-# DF_Puntos = DF_Puntos_.copy()
-
-
-# #  CONVERSION DE COORDENADAS A GRADOS DECIMALES 
-# # FUNCION PARA CONVERTIR COORDENADAS TIPO ICAO A GRADOS DECIMALES
-# # LAT -> DDMMSS,ssssN/S
-# # LON -> DDDMMSS,ssssE/W
-
-# def convertir_coord_icao_a_decimal(coord_txt, tipo='lat'):
-
-#     if pd.isna(coord_txt):
-#         return None
-
-#     coord_txt = str(coord_txt).strip().replace(' ', '').replace(',', '.')
-#     hemisferio = coord_txt[-1].upper()
-#     valor = coord_txt[:-1]
-
-#     if '.' in valor:
-#         parte_entera, parte_decimal = valor.split('.', 1)
-#     else:
-#         parte_entera = valor
-#         parte_decimal = ''
-
-#     if tipo == 'lat':
-#         grados = int(parte_entera[0:2])
-#         minutos = int(parte_entera[2:4])
-#         segundos_txt = parte_entera[4:]
-#     else:
-#         grados = int(parte_entera[0:3])
-#         minutos = int(parte_entera[3:5])
-#         segundos_txt = parte_entera[5:]
-
-#     if parte_decimal != '':
-#         segundos = float(segundos_txt + '.' + parte_decimal)
-#     else:
-#         segundos = float(segundos_txt)
-
-#     coord_decimal = grados + minutos / 60 + segundos / 3600
-
-#     if hemisferio in ['S', 'W']:
-#         coord_decimal = -coord_decimal
-
-#     return coord_decimal
-
-
-# # PREPARACION DE LOS PUNTOS EN RUTA
-# # SELECCION DE LAS COLUMNAS DE INTERES
-
-# DF_Puntos = DF_Puntos[['IDENT_TXT', 'NAME_TXT', 'LAT_TXT', 'LONG_TXT']].copy()
-# DF_Puntos = DF_Puntos.rename(columns={
-#     'IDENT_TXT': 'PUNTO_ID',
-#     'NAME_TXT': 'NOMBRE',
-#     'LAT_TXT': 'LAT_TXT',
-#     'LONG_TXT': 'LON_TXT'
-# })
-
-# # ELIMINAR FILAS SIN COORDENADAS
-# DF_Puntos = DF_Puntos.dropna(subset=['LAT_TXT', 'LON_TXT']).reset_index(drop=True)
-
-# # CONVERSION DE COORDENADAS A GRADOS DECIMALES
-# DF_Puntos['LAT'] = DF_Puntos['LAT_TXT'].apply(lambda x: convertir_coord_icao_a_decimal(x, tipo='lat'))
-# DF_Puntos['LON'] = DF_Puntos['LON_TXT'].apply(lambda x: convertir_coord_icao_a_decimal(x, tipo='lon'))
-
-# # CREACION DE UNA COLUMNA DE COORDENADAS EN EL MISMO FORMATO QUE BLOQUES.TXT
-# # FORMATO: (LAT, LON)
-# DF_Puntos['Coordenadas'] = list(zip(DF_Puntos['LAT'], DF_Puntos['LON']))
-
-# # DATAFRAME FINAL DE PUNTOS
-# DF_Puntos_Enruta = DF_Puntos[['PUNTO_ID', 'NOMBRE', 'LAT', 'LON', 'Coordenadas']].copy()
-
-# print(DF_Puntos_Enruta.head())
-
-
 
 
 
