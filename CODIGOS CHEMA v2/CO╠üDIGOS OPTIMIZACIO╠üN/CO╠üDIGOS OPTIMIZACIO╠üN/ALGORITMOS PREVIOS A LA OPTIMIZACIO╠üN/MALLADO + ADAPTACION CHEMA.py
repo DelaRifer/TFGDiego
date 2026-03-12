@@ -422,6 +422,37 @@ while current_lat > miny:  # Decrecer latitud hacia el sur
 # Crear un DataFrame con los datos
 DF_cells = pd.DataFrame(cell_data)
 
+def calcular_centros_celdas(DF_cells):
+    """
+    Añade al DataFrame de celdas las coordenadas del centro de cada polígono.
+
+    Parámetros
+    ----------
+    DF_cells : pandas.DataFrame
+        DataFrame que debe contener al menos la columna 'Polygon'
+        con geometrías shapely.
+
+    Devuelve
+    --------
+    pandas.DataFrame
+        Copia de DF_cells con dos columnas nuevas:
+        - 'Lon_Centro'
+        - 'Lat_Centro'
+    """
+
+    DF_cells_centros = DF_cells.copy()
+
+    DF_cells_centros['Centroide'] = DF_cells_centros['Polygon'].apply(lambda poly: poly.centroid)
+    DF_cells_centros['Lon_Centro'] = DF_cells_centros['Centroide'].apply(lambda p: p.x)
+    DF_cells_centros['Lat_Centro'] = DF_cells_centros['Centroide'].apply(lambda p: p.y)
+
+    return DF_cells_centros
+
+DF_cells_centros = calcular_centros_celdas(DF_cells)
+
+Puntos_Centro_Celdas = DF_cells_centros[['Lon_Centro', 'Lat_Centro']].copy()
+Puntos_Centro_Celdas = Puntos_Centro_Celdas.rename(columns={'Lon_Centro': 'LON', 'Lat_Centro': 'LAT'})
+
 # Graficar el sector con las celdas recortadas
 fig, ax_cells = plt.subplots()
 ax_cells.set_xlim(min_lon, max_lon)  # ajusta los límites en el eje x
