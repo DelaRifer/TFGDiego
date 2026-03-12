@@ -31,7 +31,7 @@ import math
 from shapely.prepared import prep
 from shapely.strtree import STRtree
 from scipy.spatial import Voronoi, Delaunay, voronoi_plot_2d
-
+from pyproj import Geod
 
 import time
 start_time = time.time()
@@ -415,6 +415,7 @@ while current_lat > miny:  # Decrecer latitud hacia el sur
 # Crear un DataFrame con los datos
 DF_cells = pd.DataFrame(cell_data)
 
+#Calcular los centros de las celdas
 def calcular_centros_celdas(DF_cells):
     """
     Añade al DataFrame de celdas las coordenadas del centro de cada polígono.
@@ -436,6 +437,7 @@ def calcular_centros_celdas(DF_cells):
     DF_cells_centros = DF_cells.copy()
 
     DF_cells_centros['Centroide'] = DF_cells_centros['Polygon'].apply(lambda poly: poly.centroid)
+    # DF_cells_centros['Centroide'] = DF_cells_centros['Polygon'].apply(lambda poly: poly.representative_point())
     DF_cells_centros['Lon_Centro'] = DF_cells_centros['Centroide'].apply(lambda p: p.x)
     DF_cells_centros['Lat_Centro'] = DF_cells_centros['Centroide'].apply(lambda p: p.y)
 
@@ -446,8 +448,105 @@ DF_cells_centros = calcular_centros_celdas(DF_cells)
 Puntos_Centro_Celdas = DF_cells_centros[['Lon_Centro', 'Lat_Centro']].copy()
 Puntos_Centro_Celdas = Puntos_Centro_Celdas.rename(columns={'Lon_Centro': 'LON', 'Lat_Centro': 'LAT'})
 
+
+#PUNTOS EQUIDISTANTES EN EL PERIMETRO DEL ACC
+
+# Distancia entre puntos en millas nauticas
+distancia_nm = 25
+distancia_m = distancia_nm * 1852  # 1 NM = 1852 m
+
+# Geodesia WGS84
+geod = Geod(ellps='WGS84')
+
+# Coordenadas del perimetro exterior del ACC
+coords_perimetro = list(poligono_ACC.exterior.coords)
+
+# Eliminar el ultimo punto si repite el primero
+if coords_perimetro[0] == coords_perimetro[-1]:
+    coords_perimetro = coords_perimetro[:-1]
+
+# Limites del ACC
+minx, miny, maxx, maxy = poligono_ACC.bounds
+
+# Esquina superior izquierda del bounding box
+punto_ref = (minx, maxy)
+
+# Buscar el vertice del perimetro mas cercano a esa esquina
+idx_inicio = min(
+    range(len(coords_perimetro)),
+    key=lambda i: (coords_perimetro[i][0] - punto_ref[0])**2 + (coords_perimetro[i][1] - punto_ref[1])**2
+)
+
+# Reordenar el perimetro para empezar en ese punto
+coords_perimetro = coords_perimetro[idx_inicio:] + coords_perimetro[:idx_inicio]
+
+# Cerrar de nuevo el anillo
+coords_perimetro.append(coords_perimetro[0])
+
+# Lista de puntos generados
+puntos_perimetro = []
+
+# Primer punto: el de inicio
+lon_ini, lat_ini = coords_perimetro[0]
+puntos_perimetro.append((lon_ini, lat_ini))
+
+# Distancia que falta para colocar el siguiente punto
+distancia_restante = distancia_m
+
+# Recorrer cada segmento del perimetro
+for i in range(len(coords_perimetro) - 1):
+    lon1, lat1 = coords_perimetro[i]
+    lon2, lat2 = coords_perimetro[i + 1]
+
+    az12, az21, longitud_segmento = geod.inv(lon1, lat1, lon2, lat2)
+
+    while longitud_segmento >= distancia_restante:
+        # Nuevo punto a distancia_restante desde el inicio del segmento actual
+        lon_nuevo, lat_nuevo, _ = geod.fwd(lon1, lat1, az12, distancia_restante)
+        puntos_perimetro.append((lon_nuevo, lat_nuevo))
+
+        # El nuevo punto pasa a ser el inicio del tramo restante
+        lon1, lat1 = lon_nuevo, lat_nuevo
+        az12, az21, longitud_segmento = geod.inv(lon1, lat1, lon2, lat2)
+
+        # Reiniciar contador para el siguiente salto
+        distancia_restante = distancia_m
+
+    # Si no da para meter otro punto en este segmento,
+    # acumulamos lo que falta para el siguiente
+    distancia_restante -= longitud_segmento
+
+# Crear DataFrame final con el mismo formato que tus puntos semilla
+DF_Puntos_Perimetro_ACC = pd.DataFrame(puntos_perimetro, columns=['LON', 'LAT'])
+
+
 # DEFINICION DE LOS PUNTOS SEMILLA
-Puntos_Semilla = Puntos_Centro_Celdas.copy()
+Puntos_Semilla = pd.concat(
+    [Puntos_Centro_Celdas, DF_Puntos_Perimetro_ACC],
+    ignore_index=True
+).drop_duplicates(subset=['LON', 'LAT']).reset_index(drop=True)
+
+
+# RECTANGULO CONTENEDOR DEL ACC CON MARGEN MINIMO DE 25 NM
+
+margen_nm = 25
+
+# Margen en latitud: 1 grado = 60 NM
+margen_lat_deg = margen_nm / 60.0
+
+# Para la longitud usamos la latitud más desfavorable,
+# para garantizar que la separación minima sea al menos 25 NM
+lat_extrema = max(abs(miny), abs(maxy))
+margen_lon_deg = margen_nm / (math.cos(math.radians(lat_extrema)) * 60.0)
+
+# Limites del rectangulo contenedor
+minx_rect = minx - margen_lon_deg
+maxx_rect = maxx + margen_lon_deg
+miny_rect = miny - margen_lat_deg
+maxy_rect = maxy + margen_lat_deg
+
+# Crear el poligono rectangular contenedor
+poligono_rectangulo_contenedor = box(minx_rect, miny_rect, maxx_rect, maxy_rect)
 
 # REPRESENTACION DEL ACC JUNTO CON LOS PUNTOS SEMILLA
 min_lat = []
@@ -506,28 +605,44 @@ if len(coords) < 3:
 # CREACION DEL DIAGRAMA DE VORONOI
 vor = Voronoi(coords)
 
-# LIMITES DEL GRAFICO A PARTIR DEL ACC
+# LIMITES DEL GRAFICO A PARTIR DEL RECTANGULO CONTENEDOR
 x_acc, y_acc = poligono_ACC.exterior.xy
+x_rect, y_rect = poligono_rectangulo_contenedor.exterior.xy
 
-min_lat = min(y_acc) - 0.5
-max_lat = max(y_acc) + 0.5
-min_lon = min(x_acc) - 0.5
-max_lon = max(x_acc) + 0.5
+min_lat = min(y_rect) - 0.1
+max_lat = max(y_rect) + 0.1
+min_lon = min(x_rect) - 0.1
+max_lon = max(x_rect) + 0.1
 
 # PLOT
 fig, ax = plt.subplots(figsize=(10, 10))
-ax.set_xlim(min_lon, max_lon)
-ax.set_ylim(min_lat, max_lat)
-ax.set_aspect('equal')
 plt.xlabel('LONGITUD [º]')
 plt.ylabel('LATITUD [º]')
-plt.title('REPRESENTACION DEL ACC, PUNTOS SEMILLA Y DIAGRAMA DE VORONOI')
+plt.title('REPRESENTACION DEL ACC, RECTANGULO CONTENEDOR, PUNTOS SEMILLA Y DIAGRAMA DE VORONOI')
+
+# PLOTEAR EL RECTANGULO CONTENEDOR
+ax.plot(
+    x_rect,
+    y_rect,
+    color='red',
+    linestyle='--',
+    linewidth=1.5,
+    zorder=1,
+    label='Rectángulo contenedor'
+)
 
 # PLOTEAR EL ACC
-ax.fill(x_acc, y_acc, zorder=1, edgecolor='black', alpha=0.3, linewidth=1.5, label='ACC')
+ax.fill(
+    x_acc,
+    y_acc,
+    zorder=2,
+    edgecolor='black',
+    alpha=0.3,
+    linewidth=1.5,
+    label='ACC'
+)
 
 # PLOTEAR EL DIAGRAMA DE VORONOI
-# No se reconstruyen las regiones infinitas: se dibuja tal cual
 voronoi_plot_2d(
     vor,
     ax=ax,
@@ -537,30 +652,36 @@ voronoi_plot_2d(
     line_alpha=1
 )
 
+# VOLVER A FIJAR LOS LIMITES DESPUES DEL VORONOI
+ax.set_xlim(min_lon, max_lon)
+ax.set_ylim(min_lat, max_lat)
+ax.set_aspect('equal')
+
 # PLOTEAR LOS PUNTOS SEMILLA
 ax.scatter(
     Puntos_Semilla_Voronoi['LON'],
     Puntos_Semilla_Voronoi['LAT'],
-    zorder=3,
+    zorder=4,
     s=15,
     marker='o',
     label='Puntos semilla'
 )
 
-plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=2, fontsize='small')
+plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=3, fontsize='small')
 plt.show()
-
 
 #TRIANGULACION DE DELAUNAY
 # VERTICES FINITOS OBTENIDOS DEL DIAGRAMA DE VORONOI
 
 #Vertices_Voronoi = vor.vertices.copy() #Todos los vértices, incluidos los infinitos
+
 ACC_preparado = prep(poligono_ACC)
+Rectangulo_preparado = prep(poligono_rectangulo_contenedor)
 
 Vertices_Voronoi = np.array([
     v for v in vor.vertices
-    if ACC_preparado.covers(Point(v[0], v[1]))
-]) # Solo los vértices que están dentro del ACC
+    if Rectangulo_preparado.covers(Point(v[0], v[1]))
+]) # Solo los vértices que están dentro del rectángulo contenedor
 
 # COMPROBACION MINIMA
 if len(Vertices_Voronoi) < 3:
@@ -608,15 +729,15 @@ ax.scatter(
     label='Vertices Voronoi'
 )
 
-# PLOTEAR LOS PUNTOS SEMILLA
-ax.scatter(
-    Puntos_Semilla_Voronoi['LON'],
-    Puntos_Semilla_Voronoi['LAT'],
-    zorder=4,
-    s=15,
-    marker='o',
-    label='Puntos semilla'
-)
+# # PLOTEAR LOS PUNTOS SEMILLA
+# ax.scatter(
+#     Puntos_Semilla_Voronoi['LON'],
+#     Puntos_Semilla_Voronoi['LAT'],
+#     zorder=4,
+#     s=15,
+#     marker='o',
+#     label='Puntos semilla'
+# )
 
 plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=3, fontsize='small')
 plt.show()
