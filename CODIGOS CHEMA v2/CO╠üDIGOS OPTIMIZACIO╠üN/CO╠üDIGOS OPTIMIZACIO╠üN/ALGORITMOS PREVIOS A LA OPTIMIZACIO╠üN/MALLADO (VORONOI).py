@@ -20,7 +20,7 @@ from shapely import wkt
 from shapely.wkt import loads
 import pickle
 from shapely.geometry import Polygon, MultiPolygon, Point, LineString, box
-from shapely.ops import unary_union, nearest_points
+from shapely.ops import unary_union, nearest_points, transform
 from datetime import datetime
 import shap
 import time
@@ -28,10 +28,11 @@ import seaborn as sns
 import gc
 import ast
 import math
+import random
 from shapely.prepared import prep
 from shapely.strtree import STRtree
 from scipy.spatial import Voronoi, Delaunay, voronoi_plot_2d
-from pyproj import Geod
+from pyproj import Geod, CRS, Transformer
 
 import time
 start_time = time.time()
@@ -355,121 +356,115 @@ plt.show()
 # -------------------------------------------------------------------------------------------------------------------- #
 # ------------------------------------------- OBTENCIÓN DEL MALLADO DEL ACC ------------------------------------------ #
 # -------------------------------------------------------------------------------------------------------------------- #
+#DEFINICIÓN PARÁMETROS PUNTOS RANDOM
+DISTANCIA_PERIMETRO_NM = 25
+NUMERO_PUNTOS_RANDOM = 50
+DISTANCIA_MINIMA_PUNTOS_NM = 25
+DISTANCIA_MINIMA_BORDE_NM = 30
+SEMILLA_RANDOM = 10
 
-# MALLADO DEL ACC
-# Tamaño de celda en millas náuticas
-cell_size_nm = 25
+#FUNCION PARA CREAR PUNTOS RANDOM EN EL ACC 
+def crear_puntos_random_en_acc(poligono_ACC, numero_puntos, distancia_min_nm, distancia_borde_nm,
+                               semilla):
+    
+    max_intentos = 200000
 
-# Convertir tamaño de celdas de NM a grados de latitud (constante)
-cell_size_lat_deg = cell_size_nm / 60.0
+    distancia_min_m = distancia_min_nm * 1852
+    distancia_borde_m = distancia_borde_nm * 1852
 
-# Obtener los límites del sector
-minx, miny, maxx, maxy = poligono_ACC.bounds
+    # Proyeccion local en metros centrada en el ACC
+    centroide = poligono_ACC.centroid
+    lon0, lat0 = centroide.x, centroide.y
 
-# Crear celdas ajustando longitud a partir de latitud promedio del sector
-lat_center = (miny + maxy) / 2
-cell_size_lon_deg = cell_size_nm / (math.cos(math.radians(lat_center)) * 60)
+    crs_local = CRS.from_proj4(
+        f'+proj=aeqd +lat_0={lat0} +lon_0={lon0} +datum=WGS84 +units=m +no_defs'
+    )
 
-# Lista para almacenar los datos de las celdas
-cell_data = []
+    transformer_a_metros = Transformer.from_crs('EPSG:4326', crs_local, always_xy=True)
+    transformer_a_geo = Transformer.from_crs(crs_local, 'EPSG:4326', always_xy=True)
 
-# Crear la malla desde la esquina superior izquierda (con soporte para MultiPolygon)
-cells = []
-cell_id = 1  # Iniciar el contador para las celdas
-current_lat = maxy  # Iniciar desde la latitud máxima (norte)
+    # Pasar el ACC a metros
+    poligono_ACC_m = transform(transformer_a_metros.transform, poligono_ACC)
 
-while current_lat > miny:  # Decrecer latitud hacia el sur
-    current_lon = minx  # Iniciar desde la longitud mínima (oeste)
-    while current_lon < maxx:  # Aumentar longitud hacia el este
-        # Crear la celda
-        cell = box(current_lon, current_lat - cell_size_lat_deg, current_lon + cell_size_lon_deg, current_lat)
-        # Recortar la celda con el espacio aéreo
-        intersected_cell = cell.intersection(poligono_ACC)
+    # Zona valida: interior del ACC alejado al menos distancia_borde_m del borde
+    zona_valida_m = poligono_ACC_m.buffer(-distancia_borde_m)
 
-        if not intersected_cell.is_empty:
-            if isinstance(intersected_cell, Polygon):
-                coords = list(intersected_cell.exterior.coords)
-                cells.append(intersected_cell)
-                cell_data.append({
-                    'Cell_Name': f'Cell_{cell_id}',
-                    'Polygon': intersected_cell,
-                    'Coordinates': coords
-                })
-                cell_id += 1
+    if zona_valida_m.is_empty:
+        raise ValueError(
+            'La zona valida interior es vacia. '
+            'Reduce la distancia minima al borde o revisa la geometria del ACC'
+        )
 
-            elif isinstance(intersected_cell, MultiPolygon):
-                for poly in intersected_cell.geoms:
-                    coords = list(poly.exterior.coords)
-                    cells.append(poly)
-                    cell_data.append({
-                        'Cell_Name': f'Cell_{cell_id}',
-                        'Polygon': poly,
-                        'Coordinates': coords
-                    })
-                    cell_id += 1
+    random.seed(semilla)
 
-        current_lon += cell_size_lon_deg  # Moverse hacia el este
-    current_lat -= cell_size_lat_deg  # Moverse hacia el sur
+    minx, miny, maxx, maxy = zona_valida_m.bounds
+    puntos_random_m = []
+
+    intentos = 0
+    while len(puntos_random_m) < numero_puntos and intentos < max_intentos:
+        intentos += 1
+
+        x_rand = random.uniform(minx, maxx)
+        y_rand = random.uniform(miny, maxy)
+        punto_candidato = Point(x_rand, y_rand)
+
+        # Debe estar dentro de la zona valida
+        if not zona_valida_m.covers(punto_candidato):
+            continue
+
+        # Debe respetar la distancia minima al resto de puntos random
+        valido = True
+        for p in puntos_random_m:
+            if punto_candidato.distance(p) < distancia_min_m:
+                valido = False
+                break
+
+        if valido:
+            puntos_random_m.append(punto_candidato)
+
+    if len(puntos_random_m) < numero_puntos:
+        raise ValueError(
+            f'No se pudieron generar {numero_puntos} puntos con las restricciones dadas. '
+            f'Solo se generaron {len(puntos_random_m)}. '
+            f'Prueba a reducir el numero de puntos o las distancias minimas'
+        )
+
+    # Volver a coordenadas geograficas
+    puntos_random_geo = []
+    for p in puntos_random_m:
+        lon, lat = transformer_a_geo.transform(p.x, p.y)
+        puntos_random_geo.append((lon, lat))
+
+    DF_Puntos_Random_ACC = pd.DataFrame(puntos_random_geo, columns=['LON', 'LAT'])
+
+    return DF_Puntos_Random_ACC
 
 
-# Crear un DataFrame con los datos
-DF_cells = pd.DataFrame(cell_data)
-
-#Calcular los centros de las celdas
-def calcular_centros_celdas(DF_cells):
-    """
-    Añade al DataFrame de celdas las coordenadas del centro de cada polígono.
-
-    Parámetros
-    ----------
-    DF_cells : pandas.DataFrame
-        DataFrame que debe contener al menos la columna 'Polygon'
-        con geometrías shapely.
-
-    Devuelve
-    --------
-    pandas.DataFrame
-        Copia de DF_cells con dos columnas nuevas:
-        - 'Lon_Centro'
-        - 'Lat_Centro'
-    """
-
-    DF_cells_centros = DF_cells.copy()
-
-    DF_cells_centros['Centroide'] = DF_cells_centros['Polygon'].apply(lambda poly: poly.centroid)
-    # DF_cells_centros['Centroide'] = DF_cells_centros['Polygon'].apply(lambda poly: poly.representative_point())
-    DF_cells_centros['Lon_Centro'] = DF_cells_centros['Centroide'].apply(lambda p: p.x)
-    DF_cells_centros['Lat_Centro'] = DF_cells_centros['Centroide'].apply(lambda p: p.y)
-
-    return DF_cells_centros
-
-DF_cells_centros = calcular_centros_celdas(DF_cells)
-
-Puntos_Centro_Celdas = DF_cells_centros[['Lon_Centro', 'Lat_Centro']].copy()
-Puntos_Centro_Celdas = Puntos_Centro_Celdas.rename(columns={'Lon_Centro': 'LON', 'Lat_Centro': 'LAT'})
+DF_Puntos_Random_ACC = crear_puntos_random_en_acc(
+    poligono_ACC=poligono_ACC,
+    numero_puntos=NUMERO_PUNTOS_RANDOM,
+    distancia_min_nm=DISTANCIA_MINIMA_PUNTOS_NM,
+    distancia_borde_nm=DISTANCIA_MINIMA_BORDE_NM,
+    semilla=SEMILLA_RANDOM #siempre la misma distribución; semilla = None: diferentes cada vez
+)
 
 
 #PUNTOS EQUIDISTANTES EN EL PERIMETRO DEL ACC
-
 # Distancia entre puntos en millas nauticas
 distancia_nm = 25
 distancia_m = distancia_nm * 1852  # 1 NM = 1852 m
 
-# Geodesia WGS84
-geod = Geod(ellps='WGS84')
+geod = Geod(ellps='WGS84')# Geodesia WGS84
 
-# Coordenadas del perimetro exterior del ACC
-coords_perimetro = list(poligono_ACC.exterior.coords)
+coords_perimetro = list(poligono_ACC.exterior.coords)# Coordenadas del perimetro exterior del ACC
 
 # Eliminar el ultimo punto si repite el primero
 if coords_perimetro[0] == coords_perimetro[-1]:
     coords_perimetro = coords_perimetro[:-1]
 
-# Limites del ACC
-minx, miny, maxx, maxy = poligono_ACC.bounds
+minx, miny, maxx, maxy = poligono_ACC.bounds # Limites del ACC
 
-# Esquina superior izquierda del bounding box
-punto_ref = (minx, maxy)
+punto_ref = (minx, maxy) # Esquina superior izquierda del bounding box
 
 # Buscar el vertice del perimetro mas cercano a esa esquina
 idx_inicio = min(
@@ -477,21 +472,16 @@ idx_inicio = min(
     key=lambda i: (coords_perimetro[i][0] - punto_ref[0])**2 + (coords_perimetro[i][1] - punto_ref[1])**2
 )
 
-# Reordenar el perimetro para empezar en ese punto
-coords_perimetro = coords_perimetro[idx_inicio:] + coords_perimetro[:idx_inicio]
+coords_perimetro = coords_perimetro[idx_inicio:] + coords_perimetro[:idx_inicio] # Reordenar el perimetro para empezar en ese punto
+coords_perimetro.append(coords_perimetro[0]) # Cerrar de nuevo el anillo
 
-# Cerrar de nuevo el anillo
-coords_perimetro.append(coords_perimetro[0])
-
-# Lista de puntos generados
-puntos_perimetro = []
+puntos_perimetro = [] # Lista de puntos generados
 
 # Primer punto: el de inicio
 lon_ini, lat_ini = coords_perimetro[0]
 puntos_perimetro.append((lon_ini, lat_ini))
 
-# Distancia que falta para colocar el siguiente punto
-distancia_restante = distancia_m
+distancia_restante = distancia_m # Distancia que falta para colocar el siguiente punto
 
 # Recorrer cada segmento del perimetro
 for i in range(len(coords_perimetro) - 1):
@@ -522,13 +512,12 @@ DF_Puntos_Perimetro_ACC = pd.DataFrame(puntos_perimetro, columns=['LON', 'LAT'])
 
 # DEFINICION DE LOS PUNTOS SEMILLA
 Puntos_Semilla = pd.concat(
-    [Puntos_Centro_Celdas, DF_Puntos_Perimetro_ACC],
+    [DF_Puntos_Perimetro_ACC, DF_Puntos_Random_ACC],
     ignore_index=True
 ).drop_duplicates(subset=['LON', 'LAT']).reset_index(drop=True)
 
 
 # RECTANGULO CONTENEDOR DEL ACC CON MARGEN MINIMO DE 25 NM
-
 margen_nm = 25
 
 # Margen en latitud: 1 grado = 60 NM
@@ -690,6 +679,50 @@ if len(Vertices_Voronoi) < 3:
 # TRIANGULACION DE DELAUNAY A PARTIR DE LOS VERTICES DE VORONOI
 tri = Delaunay(Vertices_Voronoi)
 
+# RECORTE DE LOS TRIANGULOS DE DELAUNAY CON EL ACC
+triangle_data = []
+triangles_recortados = []
+triangle_id = 1
+
+for simplex in tri.simplices:
+    # Coordenadas de los 3 vertices del triangulo
+    coords_tri = Vertices_Voronoi[simplex]
+
+    # Crear el poligono triangular
+    triangulo = Polygon(coords_tri)
+
+    # Corregir posibles problemas geometricos
+    if not triangulo.is_valid:
+        triangulo = triangulo.buffer(0)
+
+    # Recortar el triangulo con el ACC
+    intersected_triangle = triangulo.intersection(poligono_ACC)
+
+    if not intersected_triangle.is_empty:
+        if isinstance(intersected_triangle, Polygon):
+            coords = list(intersected_triangle.exterior.coords)
+            triangles_recortados.append(intersected_triangle)
+            triangle_data.append({
+                'Triangle_Name': f'Triangle_{triangle_id}',
+                'Polygon': intersected_triangle,
+                'Coordinates': coords
+            })
+            triangle_id += 1
+
+        elif isinstance(intersected_triangle, MultiPolygon):
+            for poly in intersected_triangle.geoms:
+                coords = list(poly.exterior.coords)
+                triangles_recortados.append(poly)
+                triangle_data.append({
+                    'Triangle_Name': f'Triangle_{triangle_id}',
+                    'Polygon': poly,
+                    'Coordinates': coords
+                })
+                triangle_id += 1
+
+# Crear DataFrame con los triangulos recortados
+DF_triangles = pd.DataFrame(triangle_data)
+
 # LIMITES DEL GRAFICO A PARTIR DEL ACC
 x_acc, y_acc = poligono_ACC.exterior.xy
 
@@ -710,14 +743,16 @@ plt.title('REPRESENTACION DEL ACC, PUNTOS SEMILLA Y TRIANGULACION DE DELAUNAY')
 # PLOTEAR EL ACC
 ax.fill(x_acc, y_acc, zorder=1, edgecolor='black', alpha=0.3, linewidth=1.5, label='ACC')
 
-# PLOTEAR LA TRIANGULACION DE DELAUNAY USANDO LOS VERTICES DEL VORONOI
-ax.triplot(
-    Vertices_Voronoi[:, 0],
-    Vertices_Voronoi[:, 1],
-    tri.simplices,
-    zorder=2,
-    linewidth=1.0
-)
+# PLOTEAR LA TRIANGULACION DE DELAUNAY RECORTADA AL ACC
+for poly in triangles_recortados:
+    x_tri, y_tri = poly.exterior.xy
+    ax.plot(
+        x_tri,
+        y_tri,
+        zorder=2,
+        linewidth=1.0,
+        color='blue'
+    )
 
 # PLOTEAR LOS VERTICES DEL VORONOI
 ax.scatter(
