@@ -358,10 +358,10 @@ plt.show()
 # -------------------------------------------------------------------------------------------------------------------- #
 #DEFINICIÓN PARÁMETROS PUNTOS RANDOM
 DISTANCIA_PERIMETRO_NM = 25
-NUMERO_PUNTOS_RANDOM = 50
+NUMERO_PUNTOS_RANDOM = 60
 DISTANCIA_MINIMA_PUNTOS_NM = 25
-DISTANCIA_MINIMA_BORDE_NM = 30
-SEMILLA_RANDOM = 10
+DISTANCIA_MINIMA_BORDE_NM = 10
+SEMILLA_RANDOM = 20
 
 #FUNCION PARA CREAR PUNTOS RANDOM EN EL ACC 
 def crear_puntos_random_en_acc(poligono_ACC, numero_puntos, distancia_min_nm, distancia_borde_nm,
@@ -511,10 +511,7 @@ DF_Puntos_Perimetro_ACC = pd.DataFrame(puntos_perimetro, columns=['LON', 'LAT'])
 
 
 # DEFINICION DE LOS PUNTOS SEMILLA
-Puntos_Semilla = pd.concat(
-    [DF_Puntos_Perimetro_ACC, DF_Puntos_Random_ACC],
-    ignore_index=True
-).drop_duplicates(subset=['LON', 'LAT']).reset_index(drop=True)
+Puntos_Semilla = DF_Puntos_Random_ACC.copy().drop_duplicates(subset=['LON', 'LAT']).reset_index(drop=True)
 
 
 # RECTANGULO CONTENEDOR DEL ACC CON MARGEN MINIMO DE 25 NM
@@ -660,24 +657,33 @@ plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=3, fontsize='sm
 plt.show()
 
 #TRIANGULACION DE DELAUNAY
-# VERTICES FINITOS OBTENIDOS DEL DIAGRAMA DE VORONOI
 
 #Vertices_Voronoi = vor.vertices.copy() #Todos los vértices, incluidos los infinitos
 
 ACC_preparado = prep(poligono_ACC)
 Rectangulo_preparado = prep(poligono_rectangulo_contenedor)
 
+# VERTICES FINITOS DE VORONOI DENTRO DEL RECTANGULO CONTENEDOR
 Vertices_Voronoi = np.array([
     v for v in vor.vertices
     if Rectangulo_preparado.covers(Point(v[0], v[1]))
-]) # Solo los vértices que están dentro del rectángulo contenedor
+])
+
+# PUNTOS DEL PERIMETRO PARA USARLOS TAMBIEN COMO VERTICES DE DELAUNAY
+Puntos_Perimetro_Delaunay = DF_Puntos_Perimetro_ACC[['LON', 'LAT']].drop_duplicates().to_numpy()
+
+# CONCATENACION DE VERTICES DE VORONOI + PUNTOS DEL PERIMETRO
+Vertices_Delaunay = np.vstack([Vertices_Voronoi, Puntos_Perimetro_Delaunay])
+
+# ELIMINAR DUPLICADOS GEOMETRICOS
+Vertices_Delaunay = np.unique(np.round(Vertices_Delaunay, decimals=12), axis=0)
 
 # COMPROBACION MINIMA
-if len(Vertices_Voronoi) < 3:
-    raise ValueError('No hay suficientes vertices de Voronoi para construir una triangulacion de Delaunay')
+if len(Vertices_Delaunay) < 3:
+    raise ValueError('No hay suficientes vertices para construir una triangulacion de Delaunay')
 
-# TRIANGULACION DE DELAUNAY A PARTIR DE LOS VERTICES DE VORONOI
-tri = Delaunay(Vertices_Voronoi)
+# TRIANGULACION DE DELAUNAY
+tri = Delaunay(Vertices_Delaunay)
 
 # RECORTE DE LOS TRIANGULOS DE DELAUNAY CON EL ACC
 triangle_data = []
@@ -686,7 +692,7 @@ triangle_id = 1
 
 for simplex in tri.simplices:
     # Coordenadas de los 3 vertices del triangulo
-    coords_tri = Vertices_Voronoi[simplex]
+    coords_tri = Vertices_Delaunay[simplex]
 
     # Crear el poligono triangular
     triangulo = Polygon(coords_tri)
@@ -754,14 +760,14 @@ for poly in triangles_recortados:
         color='blue'
     )
 
-# PLOTEAR LOS VERTICES DEL VORONOI
+# PLOTEAR LOS VERTICES DE DELAUNAY
 ax.scatter(
-    Vertices_Voronoi[:, 0],
-    Vertices_Voronoi[:, 1],
+    Vertices_Delaunay[:, 0],
+    Vertices_Delaunay[:, 1],
     zorder=3,
     s=20,
     marker='x',
-    label='Vertices Voronoi'
+    label='Vertices Delaunay'
 )
 
 # # PLOTEAR LOS PUNTOS SEMILLA
@@ -776,7 +782,6 @@ ax.scatter(
 
 plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=3, fontsize='small')
 plt.show()
-
 
 #%%
 # -------------------------------------------------------------------------------------------------------------------- #
