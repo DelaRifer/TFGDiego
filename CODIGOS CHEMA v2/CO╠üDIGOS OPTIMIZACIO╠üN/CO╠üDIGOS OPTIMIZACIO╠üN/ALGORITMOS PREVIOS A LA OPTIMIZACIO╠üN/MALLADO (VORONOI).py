@@ -688,7 +688,12 @@ tri = Delaunay(Vertices_Delaunay)
 # RECORTE DE LOS TRIANGULOS DE DELAUNAY CON EL ACC
 triangle_data = []
 triangles_recortados = []
+# Renombrar listado para reutilizar código
+cell_data = []
+cells = []
+
 triangle_id = 1
+cell_id = 1
 
 for simplex in tri.simplices:
     # Coordenadas de los 3 vertices del triangulo
@@ -726,8 +731,18 @@ for simplex in tri.simplices:
                 })
                 triangle_id += 1
 
-# Crear DataFrame con los triangulos recortados
+                 # Guardado como celdas para reutilizar el resto del codigo
+                cells.append(poly)
+                cell_data.append({
+                    'Cell_Name': f'Cell_{cell_id}',
+                    'Polygon': poly,
+                    'Coordinates': coords
+                })
+                cell_id += 1
+
+# CREAR DATAFRAMES 
 DF_triangles = pd.DataFrame(triangle_data)
+DF_cells = pd.DataFrame(cell_data)
 
 # LIMITES DEL GRAFICO A PARTIR DEL ACC
 x_acc, y_acc = poligono_ACC.exterior.xy
@@ -788,9 +803,9 @@ plt.show()
 # --------------------------------------------- ANÁLISIS CELDAS POR FLUJO -------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------- #
 
-# OBTENCIÓN DE LAS CELDAS DEL MALLADO POR LAS QUE PASA CADA FLUJO - ordenando las celdas según el sentido del flujo
+# # OBTENCIÓN DE LAS CELDAS DEL MALLADO POR LAS QUE PASA CADA FLUJO - ordenando las celdas según el sentido del flujo
 
-# def puntos_flujo(line_coords, num_puntos=1000):
+# def puntos_flujo(line_coords, num_puntos=10):
 #     """ Genera puntos equidistantes a lo largo de la LineString. """
 #     start_point = line_coords[0]
 #     end_point = line_coords[-1]
@@ -809,7 +824,7 @@ plt.show()
 #     return puntos
 
 
-# def celdas_por_flujo(flujo, celdas, num_puntos=1000):
+# def celdas_por_flujo(flujo, celdas, num_puntos=10):
 #     punto_origen = flujo['Line'].coords[0]  # Punto de origen: primer punto de la línea
 #     line_coords = list(flujo['Line'].coords)
 
@@ -840,7 +855,7 @@ plt.show()
 # DF_Flujos.to_csv(PATH_resultados + 'dataset_celdas_por_flujo.csv', index=False, sep=';')
 # DF_Flujos.to_pickle(PATH_resultados + 'dataset_celdas_por_flujo.pkl')
 
-# # Me tarda la Vida en correr esta sección, hay que buscar una forma de que no tenga que borrar los puntos para celdas repetidas
+# Me tarda la Vida en correr esta sección, hay que buscar una forma de que no tenga que borrar los puntos para celdas repetidas
 
 # ---------------------------
 # MODO PRUEBAS (reversible)
