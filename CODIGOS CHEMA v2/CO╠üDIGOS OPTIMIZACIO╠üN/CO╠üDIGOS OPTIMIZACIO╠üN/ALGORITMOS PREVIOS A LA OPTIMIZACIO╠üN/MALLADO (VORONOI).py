@@ -803,151 +803,59 @@ plt.show()
 # --------------------------------------------- ANÁLISIS CELDAS POR FLUJO -------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------- #
 
-# # OBTENCIÓN DE LAS CELDAS DEL MALLADO POR LAS QUE PASA CADA FLUJO - ordenando las celdas según el sentido del flujo
+# OBTENCIÓN DE LAS CELDAS DEL MALLADO POR LAS QUE PASA CADA FLUJO - ordenando las celdas según el sentido del flujo
 
-# def puntos_flujo(line_coords, num_puntos=10):
-#     """ Genera puntos equidistantes a lo largo de la LineString. """
-#     start_point = line_coords[0]
-#     end_point = line_coords[-1]
-#     distancia_total = Point(start_point).distance(Point(end_point))
-#     puntos = [start_point]
-
-#     for i in range(1, num_puntos):
-#         factor = i / num_puntos
-#         punto_intermedio = (
-#             start_point[0] + (end_point[0] - start_point[0]) * factor,
-#             start_point[1] + (end_point[1] - start_point[1]) * factor
-#         )
-#         puntos.append(punto_intermedio)
-
-#     puntos.append(end_point)  # Añadir el punto final
-#     return puntos
-
-
-# def celdas_por_flujo(flujo, celdas, num_puntos=10):
-#     punto_origen = flujo['Line'].coords[0]  # Punto de origen: primer punto de la línea
-#     line_coords = list(flujo['Line'].coords)
-
-#     # Generar puntos equidistantes a lo largo de la línea del flujo
-#     puntos_intermedios = puntos_flujo(line_coords, num_puntos)
-
-#     celdas_visitadas = []
-#     for coord in puntos_intermedios:
-#         punto_actual = Point(coord)
-
-#         celdas_intersectadas = [celda['Cell_Name'] for _, celda in celdas.iterrows()
-#                                 if celda['Polygon'].contains(punto_actual)]
-
-#         celdas_visitadas.extend(celdas_intersectadas)
-
-#     # Eliminar celdas duplicadas y mantener el orden
-#     celdas_visitadas = list(dict.fromkeys(celdas_visitadas))  # Eliminar duplicados conservando el orden
-#     return celdas_visitadas
-
-
-# # Aplicar la función a DF_Flujos_sector
-# DF_Flujos.loc[:, 'Cell_Names'] = DF_Flujos.apply(lambda flujo: celdas_por_flujo(flujo, DF_cells), axis=1)
-
-# # Imprimir el resultado
-# print(DF_Flujos[['Flujo_Clusterizado', 'Cell_Names']])
-
-# # GUARDAR LAS BASES DE DATOS DE LAS CELDAS POR LAS QUE PASA CADA FLUJO
-# DF_Flujos.to_csv(PATH_resultados + 'dataset_celdas_por_flujo.csv', index=False, sep=';')
-# DF_Flujos.to_pickle(PATH_resultados + 'dataset_celdas_por_flujo.pkl')
-
-# Me tarda la Vida en correr esta sección, hay que buscar una forma de que no tenga que borrar los puntos para celdas repetidas
-
-# ---------------------------
-# MODO PRUEBAS (reversible)
-# ---------------------------
-FAST_MODE = True
-N_FLOWS_PRUEBA = 200          # procesa solo los primeros N flujos (debug)
-NUM_PUNTOS_FAST = 150         # en vez de 1000
-GUARDAR_EN_DISCO = False      # no guardes mientras iteras rápido
-
-def puntos_flujo(line_coords, num_puntos=100):
+def puntos_flujo(line_coords, num_puntos=50):
+    """ Genera puntos equidistantes a lo largo de la LineString. """
     start_point = line_coords[0]
     end_point = line_coords[-1]
+    distancia_total = Point(start_point).distance(Point(end_point))
     puntos = [start_point]
+
     for i in range(1, num_puntos):
         factor = i / num_puntos
-        puntos.append((
+        punto_intermedio = (
             start_point[0] + (end_point[0] - start_point[0]) * factor,
             start_point[1] + (end_point[1] - start_point[1]) * factor
-        ))
-    puntos.append(end_point)
+        )
+        puntos.append(punto_intermedio)
+
+    puntos.append(end_point)  # Añadir el punto final
     return puntos
 
-# ---------------------------
-# PRECOMPUTOS (CLAVE)
-# ---------------------------
-cell_names = DF_cells['Cell_Name'].to_list()
-cell_polys = DF_cells['Polygon'].to_list()
 
-# Prepared geometries: aceleran contains/covers
-cell_prepared = [prep(p) for p in cell_polys]
+def celdas_por_flujo(flujo, celdas, num_puntos=50):
+    punto_origen = flujo['Line'].coords[0]  # Punto de origen: primer punto de la línea
+    line_coords = list(flujo['Line'].coords)
 
-# STRtree: índice espacial para no recorrer todas las celdas
-tree = STRtree(cell_polys)
+    # Generar puntos equidistantes a lo largo de la línea del flujo
+    puntos_intermedios = puntos_flujo(line_coords, num_puntos)
 
-# Compatibilidad Shapely 1.x (query devuelve geometrías) / Shapely 2.x (puede devolver índices)
-geom_to_idx = {id(g): i for i, g in enumerate(cell_polys)}
+    celdas_visitadas = []
+    for coord in puntos_intermedios:
+        punto_actual = Point(coord)
 
-def _candidate_indices_from_query(qres):
-    if len(qres) == 0:
-        return []
-    # Shapely 2: devuelve índices (numpy ints)
-    if isinstance(qres[0], (int, np.integer)):
-        return list(map(int, qres))
-    # Shapely 1: devuelve geometrías
-    return [geom_to_idx.get(id(g), None) for g in qres if id(g) in geom_to_idx]
+        celdas_intersectadas = [celda['Cell_Name'] for _, celda in celdas.iterrows()
+                                if celda['Polygon'].contains(punto_actual)]
 
-def celdas_por_flujo_fast(flujo, num_puntos=NUM_PUNTOS_FAST):
-    line = flujo['Line']
-    coords = list(line.coords)
-    pts = puntos_flujo(coords, num_puntos)
+        celdas_visitadas.extend(celdas_intersectadas)
 
-    visitadas = []
-    last_cell = None
+    # Eliminar celdas duplicadas y mantener el orden
+    celdas_visitadas = list(dict.fromkeys(celdas_visitadas))  # Eliminar duplicados conservando el orden
+    return celdas_visitadas
 
-    for coord in pts:
-        p = Point(coord)
 
-        cand = tree.query(p)  # candidatos cercanos
-        idxs = _candidate_indices_from_query(cand)
+# Aplicar la función a DF_Flujos_sector
+DF_Flujos.loc[:, 'Cell_Names'] = DF_Flujos.apply(lambda flujo: celdas_por_flujo(flujo, DF_cells), axis=1)
 
-        found = None
-        for idx in idxs:
-            if idx is None:
-                continue
-            # covers incluye borde (a veces mejor que contains si el punto cae justo en frontera)
-            if cell_prepared[idx].covers(p):
-                found = cell_names[idx]
-                break
+# Imprimir el resultado
+print(DF_Flujos[['Flujo_Clusterizado', 'Cell_Names']])
 
-        # Evitar duplicados "en racha" sin dict.fromkeys
-        if found is not None and found != last_cell:
-            visitadas.append(found)
-            last_cell = found
+# GUARDAR LAS BASES DE DATOS DE LAS CELDAS POR LAS QUE PASA CADA FLUJO
+DF_Flujos.to_csv(PATH_resultados + 'dataset_celdas_por_flujo.csv', index=False, sep=';')
+DF_Flujos.to_pickle(PATH_resultados + 'dataset_celdas_por_flujo.pkl')
 
-    return visitadas
-
-# ---------------------------
-# APLICACIÓN (conmutador)
-# ---------------------------
-DF_Flujos_run = DF_Flujos.head(N_FLOWS_PRUEBA).copy() if FAST_MODE else DF_Flujos
-
-if FAST_MODE:
-    DF_Flujos_run.loc[:, 'Cell_Names'] = DF_Flujos_run.apply(celdas_por_flujo_fast, axis=1)
-else:
-    # Tu versión original (lenta): si quieres mantenerla
-    DF_Flujos_run.loc[:, 'Cell_Names'] = DF_Flujos_run.apply(lambda flujo: celdas_por_flujo(flujo, DF_cells), axis=1)
-
-print(DF_Flujos_run[['Flujo_Clusterizado', 'Cell_Names']].head(10))
-
-if GUARDAR_EN_DISCO:
-    DF_Flujos_run.to_csv(PATH_resultados + 'dataset_celdas_por_flujo.csv', index=False, sep=';')
-    DF_Flujos_run.to_pickle(PATH_resultados + 'dataset_celdas_por_flujo.pkl')
+# Me tarda la Vida en correr esta sección, hay que buscar una forma de que no tenga que borrar los puntos para celdas repetidas
 
 
 #%%
