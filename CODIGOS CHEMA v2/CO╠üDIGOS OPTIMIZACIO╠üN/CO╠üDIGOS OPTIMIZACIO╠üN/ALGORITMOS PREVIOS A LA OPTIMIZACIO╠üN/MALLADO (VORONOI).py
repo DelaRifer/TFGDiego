@@ -929,10 +929,10 @@ DF_cells.to_pickle(PATH_resultados + 'dataset_flujos_por_celda.pkl')
 # ---------------------------------------------- COMPROBACIONES GRÁFICAS --------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------- #
 
-# COMPROBACION GRÁFICA DE TODAS LAS CELDAS POR LAS QUE PASA CADA FLUJO
+# COMPROBACION GRÁFICA DE TODAS LAS CELDAS POR LAS QUE PASAN VARIOS FLUJOS
 
-# Elegir un flujo cualquiera
-flujo_elegido = DF_Flujos.iloc[242]  # Cambiar el índice aquí para elegir otro flujo
+# Elegir varios flujos
+flujos_elegidos = [DF_Flujos.iloc[242], DF_Flujos.iloc[100], DF_Flujos.iloc[350]]  # Cambiar los índices aquí
 
 # Crear una figura y un eje para la gráfica
 fig, ax_2 = plt.subplots()
@@ -944,22 +944,29 @@ for _, celda in DF_cells.iterrows():
     # Colocar nombre de la celda en el centro del polígono
     # ax_2.text(celda['Polygon'].centroid.x, celda['Polygon'].centroid.y, celda['Cell_Name'],fontsize=4, ha='center', color='black')
 
-# Graficar el flujo elegido (línea)
-x_flujo, y_flujo = flujo_elegido['Line'].xy
-ax_2.plot(x_flujo, y_flujo, color='red', linewidth=2)
+# Graficar los flujos elegidos (líneas)
+for flujo_elegido in flujos_elegidos:
+    x_flujo, y_flujo = flujo_elegido['Line'].xy
+    ax_2.plot(x_flujo, y_flujo, color='red', linewidth=2)
 
-# Colocar el nombre del flujo
-ax_2.text(flujo_elegido['Line'].centroid.x, flujo_elegido['Line'].centroid.y, flujo_elegido['Flujo_Clusterizado'],fontsize=10, ha='center', color='red')
+    # Colocar el nombre del flujo
+    ax_2.text(
+        flujo_elegido['Line'].centroid.x,
+        flujo_elegido['Line'].centroid.y,
+        flujo_elegido['Flujo_Clusterizado'],
+        fontsize=10,
+        ha='center',
+        color='red'
+    )
 
 # Personalizar el gráfico
 ax_2.set_xlim(min_lon, max_lon)  # ajusta los límites en el eje x
 ax_2.set_ylim(min_lat, max_lat)  # ajusta los límites en el eje y
-ax_2.set_title('REPRESENTACIÓN DEL FLUJO SOBRE EL MALLADO')
+ax_2.set_title('REPRESENTACIÓN DE LOS FLUJOS SOBRE EL MALLADO')
 ax_2.set_xlabel('LONGITUD [º]')
 ax_2.set_ylabel('LATITUD [º]')
 ax_2.set_aspect('equal')
 plt.show()
-
 
 
 #%%
