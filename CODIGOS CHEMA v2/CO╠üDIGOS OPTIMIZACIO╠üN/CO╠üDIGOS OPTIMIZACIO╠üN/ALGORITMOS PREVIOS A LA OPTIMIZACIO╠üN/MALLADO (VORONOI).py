@@ -1,5 +1,3 @@
-
-
 #%%
 # -------------------------------------------------------------------------------------------------------------------- #
 # ---------------------------------------- LIBRERIAS Y DIRECTORIOS NECESARIOS ---------------------------------------- #
@@ -12,10 +10,8 @@ import os
 import pandas as pd
 import numpy as np
 import shapely
-from shapely.geometry import box, Polygon
 import geopandas as gpd
 import matplotlib.pyplot as plt
-import itertools
 from itertools import product
 from matplotlib.lines import Line2D
 import geopy.distance
@@ -23,10 +19,8 @@ from geopy.distance import geodesic
 from shapely import wkt
 from shapely.wkt import loads
 import pickle
-from shapely.geometry import Polygon, Point, LineString, box
-from shapely.ops import nearest_points
-from shapely.geometry import Polygon, MultiPolygon
-from shapely.ops import unary_union
+from shapely.geometry import Polygon, MultiPolygon, Point, LineString, box
+from shapely.ops import unary_union, nearest_points, transform
 from datetime import datetime
 import shap
 import time
@@ -34,10 +28,11 @@ import seaborn as sns
 import gc
 import ast
 import math
+import random
 from shapely.prepared import prep
 from shapely.strtree import STRtree
-
-
+from scipy.spatial import Voronoi, Delaunay, voronoi_plot_2d
+from pyproj import Geod, CRS, Transformer
 
 import time
 start_time = time.time()
@@ -48,7 +43,6 @@ PATH_SECTOR_DATA = "C:\\TFG\\Codigos Chema\\Datos\\1. bloque prediccion\\1. bloq
 PATH_flujos = "C:\\TFG\\Codigos Chema\\Datos\\2. bloque complejidad\\2. bloque complejidad\\Datos\\MATRIZ DE INTERACCION DE FLUJOS\\"
 PATH_resultados = "C:\\TFG\\Codigos Chema\\Datos\\3. bloque optimizacion\\3. bloque optimizacion\\Resultados analisis flujo celda\\"
 PATH_TRAFICO_CELDA = "C:\\TFG\\Codigos Chema\\Datos\\3. bloque optimizacion\\3. bloque optimizacion\\Datos de entrada eCOMMET\\"
-
 configuracion_estudio = 'CNF9A2'
 
 
@@ -257,6 +251,7 @@ AIRSPACES2 = AIRSPACES2.rename(columns={'AIRSPACE_ID': 'SECTOR_ID', 'Contorno Se
 
 
 
+
 #%%
 # -------------------------------------------------------------------------------------------------------------------- #
 # -------------------------------------- REPRESENTACIÓN DE LOS SECTORES DEL ACC -------------------------------------- #
@@ -313,12 +308,6 @@ plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.25), ncol=3, fontsize='sm
 plt.show()
 
 
-
-#%%
-# -------------------------------------------------------------------------------------------------------------------- #
-# ------------------------------------------- OBTENCIÓN DEL MALLADO DEL ACC ------------------------------------------ #
-# -------------------------------------------------------------------------------------------------------------------- #
-
 # OBTENCIÓN DEL ESPACIO AÉREO ASOCIADO AL ACC
 # Unir todos los polígonos de los sectores en un único polígono o MultiPolygon
 poligonos_sectores = DF_info_conf['Contorno Sector'].tolist()
@@ -363,134 +352,460 @@ plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.25), ncol=3, fontsize='sm
 plt.show()
 
 
-# MALLADO DEL ACC
-# Tamaño de celda en millas náuticas
-cell_size_nm = 25
+#%%
+# -------------------------------------------------------------------------------------------------------------------- #
+# ------------------------------------------- OBTENCIÓN DEL MALLADO DEL ACC ------------------------------------------ #
+# -------------------------------------------------------------------------------------------------------------------- #
+#DEFINICIÓN PARÁMETROS PUNTOS RANDOM
+DISTANCIA_PERIMETRO_NM = 25
+NUMERO_PUNTOS_RANDOM = 60
+DISTANCIA_MINIMA_PUNTOS_NM = 25
+DISTANCIA_MINIMA_BORDE_NM = 10
+SEMILLA_RANDOM = 20
 
-# Convertir tamaño de celdas de NM a grados de latitud (constante)
-cell_size_lat_deg = cell_size_nm / 60.0
+#FUNCION PARA CREAR PUNTOS RANDOM EN EL ACC 
+def crear_puntos_random_en_acc(poligono_ACC, numero_puntos, distancia_min_nm, distancia_borde_nm,
+                               semilla):
+    
+    max_intentos = 200000
 
-# Obtener los límites del sector
-minx, miny, maxx, maxy = poligono_ACC.bounds
+    distancia_min_m = distancia_min_nm * 1852
+    distancia_borde_m = distancia_borde_nm * 1852
 
-# Crear celdas ajustando longitud a partir de latitud promedio del sector
-lat_center = (miny + maxy) / 2
-cell_size_lon_deg = cell_size_nm / (math.cos(math.radians(lat_center)) * 60)
+    # Proyeccion local en metros centrada en el ACC
+    centroide = poligono_ACC.centroid
+    lon0, lat0 = centroide.x, centroide.y
 
-# Lista para almacenar los datos de las celdas
+    crs_local = CRS.from_proj4(
+        f'+proj=aeqd +lat_0={lat0} +lon_0={lon0} +datum=WGS84 +units=m +no_defs'
+    )
+
+    transformer_a_metros = Transformer.from_crs('EPSG:4326', crs_local, always_xy=True)
+    transformer_a_geo = Transformer.from_crs(crs_local, 'EPSG:4326', always_xy=True)
+
+    # Pasar el ACC a metros
+    poligono_ACC_m = transform(transformer_a_metros.transform, poligono_ACC)
+
+    # Zona valida: interior del ACC alejado al menos distancia_borde_m del borde
+    zona_valida_m = poligono_ACC_m.buffer(-distancia_borde_m)
+
+    if zona_valida_m.is_empty:
+        raise ValueError(
+            'La zona valida interior es vacia. '
+            'Reduce la distancia minima al borde o revisa la geometria del ACC'
+        )
+
+    random.seed(semilla)
+
+    minx, miny, maxx, maxy = zona_valida_m.bounds
+    puntos_random_m = []
+
+    intentos = 0
+    while len(puntos_random_m) < numero_puntos and intentos < max_intentos:
+        intentos += 1
+
+        x_rand = random.uniform(minx, maxx)
+        y_rand = random.uniform(miny, maxy)
+        punto_candidato = Point(x_rand, y_rand)
+
+        # Debe estar dentro de la zona valida
+        if not zona_valida_m.covers(punto_candidato):
+            continue
+
+        # Debe respetar la distancia minima al resto de puntos random
+        valido = True
+        for p in puntos_random_m:
+            if punto_candidato.distance(p) < distancia_min_m:
+                valido = False
+                break
+
+        if valido:
+            puntos_random_m.append(punto_candidato)
+
+    if len(puntos_random_m) < numero_puntos:
+        raise ValueError(
+            f'No se pudieron generar {numero_puntos} puntos con las restricciones dadas. '
+            f'Solo se generaron {len(puntos_random_m)}. '
+            f'Prueba a reducir el numero de puntos o las distancias minimas'
+        )
+
+    # Volver a coordenadas geograficas
+    puntos_random_geo = []
+    for p in puntos_random_m:
+        lon, lat = transformer_a_geo.transform(p.x, p.y)
+        puntos_random_geo.append((lon, lat))
+
+    DF_Puntos_Random_ACC = pd.DataFrame(puntos_random_geo, columns=['LON', 'LAT'])
+
+    return DF_Puntos_Random_ACC
+
+
+DF_Puntos_Random_ACC = crear_puntos_random_en_acc(
+    poligono_ACC=poligono_ACC,
+    numero_puntos=NUMERO_PUNTOS_RANDOM,
+    distancia_min_nm=DISTANCIA_MINIMA_PUNTOS_NM,
+    distancia_borde_nm=DISTANCIA_MINIMA_BORDE_NM,
+    semilla=SEMILLA_RANDOM #siempre la misma distribución; semilla = None: diferentes cada vez
+)
+
+
+#PUNTOS EQUIDISTANTES EN EL PERIMETRO DEL ACC
+# Distancia entre puntos en millas nauticas
+distancia_nm = 25
+distancia_m = distancia_nm * 1852  # 1 NM = 1852 m
+
+geod = Geod(ellps='WGS84')# Geodesia WGS84
+
+coords_perimetro = list(poligono_ACC.exterior.coords)# Coordenadas del perimetro exterior del ACC
+
+# Eliminar el ultimo punto si repite el primero
+if coords_perimetro[0] == coords_perimetro[-1]:
+    coords_perimetro = coords_perimetro[:-1]
+
+minx, miny, maxx, maxy = poligono_ACC.bounds # Limites del ACC
+
+punto_ref = (minx, maxy) # Esquina superior izquierda del bounding box
+
+# Buscar el vertice del perimetro mas cercano a esa esquina
+idx_inicio = min(
+    range(len(coords_perimetro)),
+    key=lambda i: (coords_perimetro[i][0] - punto_ref[0])**2 + (coords_perimetro[i][1] - punto_ref[1])**2
+)
+
+coords_perimetro = coords_perimetro[idx_inicio:] + coords_perimetro[:idx_inicio] # Reordenar el perimetro para empezar en ese punto
+coords_perimetro.append(coords_perimetro[0]) # Cerrar de nuevo el anillo
+
+puntos_perimetro = [] # Lista de puntos generados
+
+# Primer punto: el de inicio
+lon_ini, lat_ini = coords_perimetro[0]
+puntos_perimetro.append((lon_ini, lat_ini))
+
+distancia_restante = distancia_m # Distancia que falta para colocar el siguiente punto
+
+# Recorrer cada segmento del perimetro
+for i in range(len(coords_perimetro) - 1):
+    lon1, lat1 = coords_perimetro[i]
+    lon2, lat2 = coords_perimetro[i + 1]
+
+    az12, az21, longitud_segmento = geod.inv(lon1, lat1, lon2, lat2)
+
+    while longitud_segmento >= distancia_restante:
+        # Nuevo punto a distancia_restante desde el inicio del segmento actual
+        lon_nuevo, lat_nuevo, _ = geod.fwd(lon1, lat1, az12, distancia_restante)
+        puntos_perimetro.append((lon_nuevo, lat_nuevo))
+
+        # El nuevo punto pasa a ser el inicio del tramo restante
+        lon1, lat1 = lon_nuevo, lat_nuevo
+        az12, az21, longitud_segmento = geod.inv(lon1, lat1, lon2, lat2)
+
+        # Reiniciar contador para el siguiente salto
+        distancia_restante = distancia_m
+
+    # Si no da para meter otro punto en este segmento,
+    # acumulamos lo que falta para el siguiente
+    distancia_restante -= longitud_segmento
+
+# Crear DataFrame final con el mismo formato que tus puntos semilla
+DF_Puntos_Perimetro_ACC = pd.DataFrame(puntos_perimetro, columns=['LON', 'LAT'])
+
+
+# DEFINICION DE LOS PUNTOS SEMILLA
+Puntos_Semilla = DF_Puntos_Random_ACC.copy().drop_duplicates(subset=['LON', 'LAT']).reset_index(drop=True)
+
+
+# RECTANGULO CONTENEDOR DEL ACC CON MARGEN MINIMO DE 25 NM
+margen_nm = 25
+
+# Margen en latitud: 1 grado = 60 NM
+margen_lat_deg = margen_nm / 60.0
+
+# Para la longitud usamos la latitud más desfavorable,
+# para garantizar que la separación minima sea al menos 25 NM
+lat_extrema = max(abs(miny), abs(maxy))
+margen_lon_deg = margen_nm / (math.cos(math.radians(lat_extrema)) * 60.0)
+
+# Limites del rectangulo contenedor
+minx_rect = minx - margen_lon_deg
+maxx_rect = maxx + margen_lon_deg
+miny_rect = miny - margen_lat_deg
+maxy_rect = maxy + margen_lat_deg
+
+# Crear el poligono rectangular contenedor
+poligono_rectangulo_contenedor = box(minx_rect, miny_rect, maxx_rect, maxy_rect)
+
+# REPRESENTACION DEL ACC JUNTO CON LOS PUNTOS SEMILLA
+min_lat = []
+max_lat = []
+min_lon = []
+max_lon = []
+
+x, y = poligono_ACC.exterior.xy
+min_lat.append(min(y))
+max_lat.append(max(y))
+min_lon.append(min(x))
+max_lon.append(max(x))
+
+min_lat = min(min_lat) - 0.5
+max_lat = max(max_lat) + 0.5
+min_lon = min(min_lon) - 0.5
+max_lon = max(max_lon) + 0.5
+
+fig, ax = plt.subplots()
+ax.set_xlim(min_lon, max_lon)
+ax.set_ylim(min_lat, max_lat)
+ax.set_aspect('equal')
+plt.xlabel('LONGITUD[º]')
+plt.ylabel('LATITUD[º]')
+plt.title('REPRESENTACION DEL ACC Y LOS PUNTOS SEMILLA')
+
+# PLOTEAR EL ACC
+ax.fill(x, y, zorder=1, edgecolor='black', alpha=0.5, linewidth=1, label='ACC')
+
+# PLOTEAR LOS PUNTOS SEMILLA
+ax.scatter(
+    Puntos_Semilla['LON'],
+    Puntos_Semilla['LAT'],
+    zorder=2,
+    s=10,
+    marker='o',
+    label='Puntos semilla'
+)
+
+plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=2, fontsize='small')
+plt.show()
+
+#DIAGRAMA DE VORONOI
+
+# ELIMINAR DUPLICADOS GEOMETRICOS PARA EVITAR PROBLEMAS EN VORONOI
+Puntos_Semilla_Voronoi = Puntos_Semilla.drop_duplicates(subset=['LON', 'LAT']).reset_index(drop=True)
+
+# COORDENADAS PARA EL DIAGRAMA DE VORONOI
+# FORMATO: x = LON, y = LAT
+coords = Puntos_Semilla_Voronoi[['LON', 'LAT']].to_numpy()
+
+# COMPROBACION MINIMA
+if len(coords) < 3:
+    raise ValueError('Se necesitan al menos 3 puntos distintos para construir un diagrama de Voronoi en 2D')
+
+# CREACION DEL DIAGRAMA DE VORONOI
+vor = Voronoi(coords)
+
+# LIMITES DEL GRAFICO A PARTIR DEL RECTANGULO CONTENEDOR
+x_acc, y_acc = poligono_ACC.exterior.xy
+x_rect, y_rect = poligono_rectangulo_contenedor.exterior.xy
+
+min_lat = min(y_rect) - 0.1
+max_lat = max(y_rect) + 0.1
+min_lon = min(x_rect) - 0.1
+max_lon = max(x_rect) + 0.1
+
+# PLOT
+fig, ax = plt.subplots(figsize=(10, 10))
+plt.xlabel('LONGITUD [º]')
+plt.ylabel('LATITUD [º]')
+plt.title('REPRESENTACION DEL ACC, RECTANGULO CONTENEDOR, PUNTOS SEMILLA Y DIAGRAMA DE VORONOI')
+
+# PLOTEAR EL RECTANGULO CONTENEDOR
+ax.plot(
+    x_rect,
+    y_rect,
+    color='red',
+    linestyle='--',
+    linewidth=1.5,
+    zorder=1,
+    label='Rectángulo contenedor'
+)
+
+# PLOTEAR EL ACC
+ax.fill(
+    x_acc,
+    y_acc,
+    zorder=2,
+    edgecolor='black',
+    alpha=0.3,
+    linewidth=1.5,
+    label='ACC'
+)
+
+# PLOTEAR EL DIAGRAMA DE VORONOI
+voronoi_plot_2d(
+    vor,
+    ax=ax,
+    show_vertices=True,
+    show_points=False,
+    line_width=1.2,
+    line_alpha=1
+)
+
+# VOLVER A FIJAR LOS LIMITES DESPUES DEL VORONOI
+ax.set_xlim(min_lon, max_lon)
+ax.set_ylim(min_lat, max_lat)
+ax.set_aspect('equal')
+
+# PLOTEAR LOS PUNTOS SEMILLA
+ax.scatter(
+    Puntos_Semilla_Voronoi['LON'],
+    Puntos_Semilla_Voronoi['LAT'],
+    zorder=4,
+    s=15,
+    marker='o',
+    label='Puntos semilla'
+)
+
+plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=3, fontsize='small')
+plt.show()
+
+#TRIANGULACION DE DELAUNAY
+
+#Vertices_Voronoi = vor.vertices.copy() #Todos los vértices, incluidos los infinitos
+
+ACC_preparado = prep(poligono_ACC)
+Rectangulo_preparado = prep(poligono_rectangulo_contenedor)
+
+# VERTICES FINITOS DE VORONOI DENTRO DEL RECTANGULO CONTENEDOR
+Vertices_Voronoi = np.array([
+    v for v in vor.vertices
+    if Rectangulo_preparado.covers(Point(v[0], v[1]))
+])
+
+# PUNTOS DEL PERIMETRO PARA USARLOS TAMBIEN COMO VERTICES DE DELAUNAY
+Puntos_Perimetro_Delaunay = DF_Puntos_Perimetro_ACC[['LON', 'LAT']].drop_duplicates().to_numpy()
+
+# CONCATENACION DE VERTICES DE VORONOI + PUNTOS DEL PERIMETRO
+Vertices_Delaunay = np.vstack([Vertices_Voronoi, Puntos_Perimetro_Delaunay])
+
+# ELIMINAR DUPLICADOS GEOMETRICOS
+Vertices_Delaunay = np.unique(np.round(Vertices_Delaunay, decimals=12), axis=0)
+
+# COMPROBACION MINIMA
+if len(Vertices_Delaunay) < 3:
+    raise ValueError('No hay suficientes vertices para construir una triangulacion de Delaunay')
+
+# TRIANGULACION DE DELAUNAY
+tri = Delaunay(Vertices_Delaunay)
+
+# RECORTE DE LOS TRIANGULOS DE DELAUNAY CON EL ACC
+triangle_data = []
+triangles_recortados = []
+# Renombrar listado para reutilizar código
 cell_data = []
-
-# Crear la malla desde la esquina superior izquierda (con soporte para MultiPolygon)
 cells = []
-cell_id = 1  # Iniciar el contador para las celdas
-current_lat = maxy  # Iniciar desde la latitud máxima (norte)
 
-while current_lat > miny:  # Decrecer latitud hacia el sur
-    current_lon = minx  # Iniciar desde la longitud mínima (oeste)
-    while current_lon < maxx:  # Aumentar longitud hacia el este
-        # Crear la celda
-        cell = box(current_lon, current_lat - cell_size_lat_deg, current_lon + cell_size_lon_deg, current_lat)
-        # Recortar la celda con el espacio aéreo
-        intersected_cell = cell.intersection(poligono_ACC)
+triangle_id = 1
+cell_id = 1
 
-        if not intersected_cell.is_empty:
-            if isinstance(intersected_cell, Polygon):
-                coords = list(intersected_cell.exterior.coords)
-                cells.append(intersected_cell)
+for simplex in tri.simplices:
+    # Coordenadas de los 3 vertices del triangulo
+    coords_tri = Vertices_Delaunay[simplex]
+
+    # Crear el poligono triangular
+    triangulo = Polygon(coords_tri)
+
+    # Corregir posibles problemas geometricos
+    if not triangulo.is_valid:
+        triangulo = triangulo.buffer(0)
+
+    # Recortar el triangulo con el ACC
+    intersected_triangle = triangulo.intersection(poligono_ACC)
+
+    if not intersected_triangle.is_empty:
+        if isinstance(intersected_triangle, Polygon):
+            coords = list(intersected_triangle.exterior.coords)
+            triangles_recortados.append(intersected_triangle)
+            triangle_data.append({
+                'Triangle_Name': f'Triangle_{triangle_id}',
+                'Polygon': intersected_triangle,
+                'Coordinates': coords
+            })
+            triangle_id += 1
+
+        elif isinstance(intersected_triangle, MultiPolygon):
+            for poly in intersected_triangle.geoms:
+                coords = list(poly.exterior.coords)
+                triangles_recortados.append(poly)
+                triangle_data.append({
+                    'Triangle_Name': f'Triangle_{triangle_id}',
+                    'Polygon': poly,
+                    'Coordinates': coords
+                })
+                triangle_id += 1
+
+                 # Guardado como celdas para reutilizar el resto del codigo
+                cells.append(poly)
                 cell_data.append({
                     'Cell_Name': f'Cell_{cell_id}',
-                    'Polygon': intersected_cell,
+                    'Polygon': poly,
                     'Coordinates': coords
                 })
                 cell_id += 1
 
-            elif isinstance(intersected_cell, MultiPolygon):
-                for poly in intersected_cell.geoms:
-                    coords = list(poly.exterior.coords)
-                    cells.append(poly)
-                    cell_data.append({
-                        'Cell_Name': f'Cell_{cell_id}',
-                        'Polygon': poly,
-                        'Coordinates': coords
-                    })
-                    cell_id += 1
-
-        current_lon += cell_size_lon_deg  # Moverse hacia el este
-    current_lat -= cell_size_lat_deg  # Moverse hacia el sur
-
-
-# Crear un DataFrame con los datos
+# CREAR DATAFRAMES 
+DF_triangles = pd.DataFrame(triangle_data)
 DF_cells = pd.DataFrame(cell_data)
 
-def calcular_centros_celdas(DF_cells):
-    """
-    Añade al DataFrame de celdas las coordenadas del centro de cada polígono.
+# LIMITES DEL GRAFICO A PARTIR DEL ACC
+x_acc, y_acc = poligono_ACC.exterior.xy
 
-    Parámetros
-    ----------
-    DF_cells : pandas.DataFrame
-        DataFrame que debe contener al menos la columna 'Polygon'
-        con geometrías shapely.
+min_lat = min(y_acc) - 0.5
+max_lat = max(y_acc) + 0.5
+min_lon = min(x_acc) - 0.5
+max_lon = max(x_acc) + 0.5
 
-    Devuelve
-    --------
-    pandas.DataFrame
-        Copia de DF_cells con dos columnas nuevas:
-        - 'Lon_Centro'
-        - 'Lat_Centro'
-    """
+# PLOT
+fig, ax = plt.subplots(figsize=(10, 10))
+ax.set_xlim(min_lon, max_lon)
+ax.set_ylim(min_lat, max_lat)
+ax.set_aspect('equal')
+plt.xlabel('LONGITUD [º]')
+plt.ylabel('LATITUD [º]')
+plt.title('REPRESENTACION DEL ACC, PUNTOS SEMILLA Y TRIANGULACION DE DELAUNAY')
 
-    DF_cells_centros = DF_cells.copy()
+# PLOTEAR EL ACC
+ax.fill(x_acc, y_acc, zorder=1, edgecolor='black', alpha=0.3, linewidth=1.5, label='ACC')
 
-    DF_cells_centros['Centroide'] = DF_cells_centros['Polygon'].apply(lambda poly: poly.centroid)
-    DF_cells_centros['Lon_Centro'] = DF_cells_centros['Centroide'].apply(lambda p: p.x)
-    DF_cells_centros['Lat_Centro'] = DF_cells_centros['Centroide'].apply(lambda p: p.y)
+# PLOTEAR LA TRIANGULACION DE DELAUNAY RECORTADA AL ACC
+for poly in triangles_recortados:
+    x_tri, y_tri = poly.exterior.xy
+    ax.plot(
+        x_tri,
+        y_tri,
+        zorder=2,
+        linewidth=1.0,
+        color='blue'
+    )
 
-    return DF_cells_centros
+# PLOTEAR LOS VERTICES DE DELAUNAY
+ax.scatter(
+    Vertices_Delaunay[:, 0],
+    Vertices_Delaunay[:, 1],
+    zorder=3,
+    s=20,
+    marker='x',
+    label='Vertices Delaunay'
+)
 
-DF_cells_centros = calcular_centros_celdas(DF_cells)
+# # PLOTEAR LOS PUNTOS SEMILLA
+# ax.scatter(
+#     Puntos_Semilla_Voronoi['LON'],
+#     Puntos_Semilla_Voronoi['LAT'],
+#     zorder=4,
+#     s=15,
+#     marker='o',
+#     label='Puntos semilla'
+# )
 
-Puntos_Centro_Celdas = DF_cells_centros[['Lon_Centro', 'Lat_Centro']].copy()
-Puntos_Centro_Celdas = Puntos_Centro_Celdas.rename(columns={'Lon_Centro': 'LON', 'Lat_Centro': 'LAT'})
-
-# Graficar el sector con las celdas recortadas
-fig, ax_cells = plt.subplots()
-ax_cells.set_xlim(min_lon, max_lon)  # ajusta los límites en el eje x
-ax_cells.set_ylim(min_lat, max_lat)  # ajusta los límites en el eje y
-ax_cells.set_aspect('equal')
-
-# Dibujar el polígono del sector
-x, y = poligono_ACC.exterior.xy
-ax_cells.plot(x, y, color='black', linewidth=1, label=f'LECMCTAN')
-
-# Dibujar las celdas recortadas
-for cell in cells:
-    if isinstance(cell, Polygon):
-        x, y = cell.exterior.xy
-        ax_cells.plot(x, y, color='gray', alpha=0.5)
-    elif isinstance(cell, MultiPolygon):
-        for poly in cell.geoms:
-            x, y = poly.exterior.xy
-            ax_cells.plot(x, y, color='gray', alpha=0.5)
-
-# Configurar la gráfica
-ax_cells.set_title("MALLADO DEL ESPACIO AÉREO CON CELDAS 25NM x 25NM")
-ax_cells.set_aspect('equal')
-ax_cells.set_xlabel('LONGITUD[º]')
-ax_cells.set_ylabel('LATITUD[º]')
-plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.25), ncol=3, fontsize='small')
+plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=3, fontsize='small')
 plt.show()
-
 
 #%%
 # -------------------------------------------------------------------------------------------------------------------- #
 # --------------------------------------------- ANÁLISIS CELDAS POR FLUJO -------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------- #
 
-# OBTENCIÓN DE LAS CELDAS DEL MALLADO POR LAS QUE PASA CADA FLUJO - ordenando las celdas según el sentido del flujo
+# # OBTENCIÓN DE LAS CELDAS DEL MALLADO POR LAS QUE PASA CADA FLUJO - ordenando las celdas según el sentido del flujo
 
-
-# def puntos_flujo(line_coords, num_puntos=1000):
+# def puntos_flujo(line_coords, num_puntos=10):
 #     """ Genera puntos equidistantes a lo largo de la LineString. """
 #     start_point = line_coords[0]
 #     end_point = line_coords[-1]
@@ -509,7 +824,7 @@ plt.show()
 #     return puntos
 
 
-# def celdas_por_flujo(flujo, celdas, num_puntos=1000):
+# def celdas_por_flujo(flujo, celdas, num_puntos=10):
 #     punto_origen = flujo['Line'].coords[0]  # Punto de origen: primer punto de la línea
 #     line_coords = list(flujo['Line'].coords)
 
@@ -540,7 +855,7 @@ plt.show()
 # DF_Flujos.to_csv(PATH_resultados + 'dataset_celdas_por_flujo.csv', index=False, sep=';')
 # DF_Flujos.to_pickle(PATH_resultados + 'dataset_celdas_por_flujo.pkl')
 
-# # Me tarda la Vida en correr esta sección, hay que buscar una forma de que no tenga que borrar los puntos para celdas repetidas
+# Me tarda la Vida en correr esta sección, hay que buscar una forma de que no tenga que borrar los puntos para celdas repetidas
 
 # ---------------------------
 # MODO PRUEBAS (reversible)
@@ -553,54 +868,86 @@ GUARDAR_EN_DISCO = False      # no guardes mientras iteras rápido
 def puntos_flujo(line_coords, num_puntos=100):
     start_point = line_coords[0]
     end_point = line_coords[-1]
-    distancia_total = Point(start_point).distance(Point(end_point))
     puntos = [start_point]
-
     for i in range(1, num_puntos):
         factor = i / num_puntos
-        punto_intermedio = (
+        puntos.append((
             start_point[0] + (end_point[0] - start_point[0]) * factor,
             start_point[1] + (end_point[1] - start_point[1]) * factor
-        )
-        puntos.append(punto_intermedio)
-
-    puntos.append(end_point)  # Añadir el punto final
+        ))
+    puntos.append(end_point)
     return puntos
 
+# ---------------------------
+# PRECOMPUTOS (CLAVE)
+# ---------------------------
+cell_names = DF_cells['Cell_Name'].to_list()
+cell_polys = DF_cells['Polygon'].to_list()
 
-def celdas_por_flujo(flujo, celdas, num_puntos=1000):
-    punto_origen = flujo['Line'].coords[0]  # Punto de origen: primer punto de la línea
-    line_coords = list(flujo['Line'].coords)
+# Prepared geometries: aceleran contains/covers
+cell_prepared = [prep(p) for p in cell_polys]
 
-    # Generar puntos equidistantes a lo largo de la línea del flujo
-    puntos_intermedios = puntos_flujo(line_coords, num_puntos)
+# STRtree: índice espacial para no recorrer todas las celdas
+tree = STRtree(cell_polys)
 
-    celdas_visitadas = []
-    for coord in puntos_intermedios:
-        punto_actual = Point(coord)
+# Compatibilidad Shapely 1.x (query devuelve geometrías) / Shapely 2.x (puede devolver índices)
+geom_to_idx = {id(g): i for i, g in enumerate(cell_polys)}
 
-        celdas_intersectadas = [celda['Cell_Name'] for _, celda in celdas.iterrows()
-                                if celda['Polygon'].contains(punto_actual)]
+def _candidate_indices_from_query(qres):
+    if len(qres) == 0:
+        return []
+    # Shapely 2: devuelve índices (numpy ints)
+    if isinstance(qres[0], (int, np.integer)):
+        return list(map(int, qres))
+    # Shapely 1: devuelve geometrías
+    return [geom_to_idx.get(id(g), None) for g in qres if id(g) in geom_to_idx]
 
-        celdas_visitadas.extend(celdas_intersectadas)
+def celdas_por_flujo_fast(flujo, num_puntos=NUM_PUNTOS_FAST):
+    line = flujo['Line']
+    coords = list(line.coords)
+    pts = puntos_flujo(coords, num_puntos)
 
-    # Eliminar celdas duplicadas y mantener el orden
-    celdas_visitadas = list(dict.fromkeys(celdas_visitadas))  # Eliminar duplicados conservando el orden
-    return celdas_visitadas
+    visitadas = []
+    last_cell = None
 
+    for coord in pts:
+        p = Point(coord)
 
-# Aplicar la función a DF_Flujos_sector
-DF_Flujos.loc[:, 'Cell_Names'] = DF_Flujos.apply(lambda flujo: celdas_por_flujo(flujo, DF_cells), axis=1)
+        cand = tree.query(p)  # candidatos cercanos
+        idxs = _candidate_indices_from_query(cand)
 
-# Imprimir el resultado
-print(DF_Flujos[['Flujo_Clusterizado', 'Cell_Names']])
+        found = None
+        for idx in idxs:
+            if idx is None:
+                continue
+            # covers incluye borde (a veces mejor que contains si el punto cae justo en frontera)
+            if cell_prepared[idx].covers(p):
+                found = cell_names[idx]
+                break
 
-# GUARDAR LAS BASES DE DATOS DE LAS CELDAS POR LAS QUE PASA CADA FLUJO
-DF_Flujos.to_csv(PATH_resultados + 'dataset_celdas_por_flujo.csv', index=False, sep=';')
-DF_Flujos.to_pickle(PATH_resultados + 'dataset_celdas_por_flujo.pkl')
+        # Evitar duplicados "en racha" sin dict.fromkeys
+        if found is not None and found != last_cell:
+            visitadas.append(found)
+            last_cell = found
 
-# Me tarda la Vida en correr esta sección, hay que buscar una forma de que no tenga que borrar los puntos para celdas repetidas
+    return visitadas
 
+# ---------------------------
+# APLICACIÓN (conmutador)
+# ---------------------------
+DF_Flujos_run = DF_Flujos.head(N_FLOWS_PRUEBA).copy() if FAST_MODE else DF_Flujos
+
+if FAST_MODE:
+    DF_Flujos_run.loc[:, 'Cell_Names'] = DF_Flujos_run.apply(celdas_por_flujo_fast, axis=1)
+else:
+    # Tu versión original (lenta): si quieres mantenerla
+    DF_Flujos_run.loc[:, 'Cell_Names'] = DF_Flujos_run.apply(lambda flujo: celdas_por_flujo(flujo, DF_cells), axis=1)
+
+print(DF_Flujos_run[['Flujo_Clusterizado', 'Cell_Names']].head(10))
+
+if GUARDAR_EN_DISCO:
+    DF_Flujos_run.to_csv(PATH_resultados + 'dataset_celdas_por_flujo.csv', index=False, sep=';')
+    DF_Flujos_run.to_pickle(PATH_resultados + 'dataset_celdas_por_flujo.pkl')
 
 
 #%%
