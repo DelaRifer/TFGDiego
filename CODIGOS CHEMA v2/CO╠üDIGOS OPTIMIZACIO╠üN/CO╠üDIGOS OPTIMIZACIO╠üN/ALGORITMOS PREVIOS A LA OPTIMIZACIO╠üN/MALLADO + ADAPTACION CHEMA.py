@@ -541,7 +541,6 @@ plt.show()
 # DF_Flujos.to_pickle(PATH_resultados + 'dataset_celdas_por_flujo.pkl')
 
 # # Me tarda la Vida en correr esta sección, hay que buscar una forma de que no tenga que borrar los puntos para celdas repetidas
-
 # ---------------------------
 # MODO PRUEBAS (reversible)
 # ---------------------------
