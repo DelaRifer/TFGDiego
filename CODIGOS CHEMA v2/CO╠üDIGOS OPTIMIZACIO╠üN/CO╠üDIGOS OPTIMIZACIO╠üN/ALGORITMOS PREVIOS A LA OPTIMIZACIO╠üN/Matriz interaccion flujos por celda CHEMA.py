@@ -164,7 +164,6 @@ def representar_cruce(row, DF_cells, DF_Flujos):
         min_lon.append(min(x))
         max_lon.append(max(x))
         ax.plot(x, y, color='gray', alpha=0.5)  # Contorno de la celda
-        ax.text(poly.centroid.x, poly.centroid.y, celda['Cell_Name'], fontsize=8, ha='center', color='black')
 
     min_lat = min(min_lat) - 0.5
     max_lat = max(max_lat) + 0.5
@@ -172,8 +171,8 @@ def representar_cruce(row, DF_cells, DF_Flujos):
     max_lon = max(max_lon) + 0.5
 
     # Establecer los límites de los ejes según las coordenadas de las celdas
-    ax.set_xlim(min_lon, max_lon)  # ajusta los límites en el eje x
-    ax.set_ylim(min_lat, max_lat)  # ajusta los límites en el eje y
+    ax.set_xlim(min_lon, max_lon)
+    ax.set_ylim(min_lat, max_lat)
 
     # Obtener los datos de los flujos correspondientes
     flujo1 = DF_Flujos[DF_Flujos['Clave_Flujo'] == row['Flujo_1']]
@@ -184,10 +183,16 @@ def representar_cruce(row, DF_cells, DF_Flujos):
     line_flujo2 = wkt_loads(flujo2['Line'].iloc[0])
 
     # Verificar las coordenadas de los flujos
-    x1, y1 =  line_flujo1.xy
-    x2, y2 =  line_flujo2.xy
+    x1, y1 = line_flujo1.xy
+    x2, y2 = line_flujo2.xy
     ax.plot(x1, y1, color='blue', linewidth=2, label=row['Flujo_1'])
     ax.plot(x2, y2, color='red', linewidth=2, label=row['Flujo_2'])
+
+    # PRINT DE LA CELDA DONDE OCURRE EL CRUCE
+    if row['Celda_Cruce'] != '-':
+        print("Celda(s) donde ocurre el cruce:", row['Celda_Cruce'])
+    else:
+        print("No se ha identificado ninguna celda de cruce.")
 
     # Dibujar el punto de cruce, si existe
     if row['Cruce_SI(1)/NO(0)'] == 1 and row['Coordenadas_Cruce'] != '-' and not isinstance(row['Coordenadas_Cruce'], LineString):
@@ -201,7 +206,8 @@ def representar_cruce(row, DF_cells, DF_Flujos):
             for celda_nombre in celdas:
                 celda_poly = DF_cells[DF_cells['Cell_Name'] == celda_nombre].iloc[0]['Polygon']
                 x, y = celda_poly.exterior.xy
-                ax.plot(x, y, color='green', linewidth=1, linestyle='-', label=celda_nombre)
+                ax.fill(x, y, color='yellow', alpha=0.5, label=celda_nombre)
+                ax.plot(x, y, color='yellow', linewidth=1, linestyle='-')
 
     # Dibujar recta de cruce si las rectas son coincidentes
     if row['Cruce_SI(1)/NO(0)'] == 1 and isinstance(row['Coordenadas_Cruce'], LineString):
@@ -209,10 +215,10 @@ def representar_cruce(row, DF_cells, DF_Flujos):
         for celda_nombre in celdas:
             celda_poly = DF_cells[DF_cells['Cell_Name'] == celda_nombre].iloc[0]['Polygon']
             x, y = celda_poly.exterior.xy
-            ax.plot(x, y, color='green', linewidth=1, linestyle='-', label=celda_nombre)
+            ax.fill(x, y, color='yellow', alpha=0.5, label=celda_nombre)
+            ax.plot(x, y, color='yellow', linewidth=1, linestyle='-')
         cruce = line_flujo1
         ax.plot(*cruce.xy, color='orange', linewidth=2, linestyle='-', label="Cruce")
-
 
     # Configuración final del gráfico
     ax.set_title('REPRESENTACIÓN DEL CRUCE DE FLUJOS SOBRE EL MALLADO', fontsize=14)
